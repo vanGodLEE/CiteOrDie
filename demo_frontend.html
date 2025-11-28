@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能招标书分析 - 异步处理演示</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .upload-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            text-align: center;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .progress-section {
+            margin-top: 20px;
+            display: none;
+        }
+        .progress-bar-container {
+            width: 100%;
+            height: 30px;
+            background-color: #f0f0f0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .status-message {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        .status-message.error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        .status-message.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .result-section {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            display: none;
+        }
+        .requirement-item {
+            padding: 15px;
+            margin: 10px 0;
+            background: white;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .log {
+            background-color: #263238;
+            color: #00ff00;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 智能招标书分析系统</h1>
+        <p>需求拆解</p>
+        
+        <!-- 上传区域 -->
+        <div class="upload-section">
+            <h3>上传招标PDF文档</h3>
+            <input type="file" id="pdfFile" accept=".pdf">
+            <br>
+            <label>
+                <input type="checkbox" id="useMock"> 使用Mock数据（无需上传PDF）
+            </label>
+            <br><br>
+            <button id="analyzeBtn" onclick="startAnalysis()">开始分析</button>
+        </div>
+        
+        <!-- 进度区域 -->
+        <div class="progress-section" id="progressSection">
+            <h3>分析进度</h3>
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar">0%</div>
+            </div>
+            <div class="status-message" id="statusMessage">准备中...</div>
+        </div>
+        
+        <!-- 结果区域 -->
+        <div class="result-section" id="resultSection">
+            <h3>分析结果</h3>
+            <div id="resultContent"></div>
+        </div>
+        
+        <!-- 日志区域 -->
+        <div class="log" id="logArea">
+            [系统] 等待开始分析...\n
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        
+        function log(message) {
+            const logArea = document.getElementById('logArea');
+            const time = new Date().toLocaleTimeString();
+            logArea.innerHTML += `[${time}] ${message}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        }
+        
+        async function startAnalysis() {
+            const fileInput = document.getElementById('pdfFile');
+            const useMock = document.getElementById('useMock').checked;
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            
+            // 验证输入
+            if (!useMock && !fileInput.files[0]) {
+                alert('请选择PDF文件或勾选使用Mock数据');
+                return;
+            }
+            
+            // 禁用按钮
+            analyzeBtn.disabled = true;
+            
+            // 显示进度区域
+            document.getElementById('progressSection').style.display = 'block';
+            document.getElementById('resultSection').style.display = 'none';
+            
+            log('📤 正在上传文件并创建任务...');
+            
+            try {
+                // 构建表单数据
+                const formData = new FormData();
+                
+                if (useMock) {
+                    // Mock模式：创建一个有效的假文件
+                    const blob = new Blob(['%PDF-1.4 Mock PDF for testing'], {type: 'application/pdf'});
+                    formData.append('file', blob, 'mock.pdf');
+                    formData.append('use_mock', 'true');
+                } else {
+                    // 真实模式：上传用户选择的文件
+                    const file = fileInput.files[0];
+                    if (!file) {
+                        alert('请选择PDF文件');
+                        analyzeBtn.disabled = false;
+                        return;
+                    }
+                    formData.append('file', file);
+                    formData.append('use_mock', 'false');
+                }
+                
+                // 发送异步分析请求
+                const response = await fetch('http://localhost:8000/analyze/async', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || '请求失败');
+                }
+                
+                const taskId = data.task_id;
+                log(`✓ 任务已创建: ${taskId}`);
+                log(`🔗 开始监听进度更新...`);
+                
+                // 连接SSE监听进度
+                connectSSE(taskId);
+                
+            } catch (error) {
+                log(`✗ 错误: ${error.message}`);
+                updateStatus(error.message, 'error');
+                analyzeBtn.disabled = false;
+            }
+        }
+        
+        function connectSSE(taskId) {
+            // 创建EventSource连接
+            eventSource = new EventSource(`http://localhost:8000/analyze/progress/${taskId}`);
+            
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                // 更新进度条
+                updateProgress(data.progress);
+                
+                // 更新状态消息
+                updateStatus(data.message, data.status);
+                
+                // 记录日志
+                log(`📊 ${data.progress.toFixed(1)}% - ${data.message}`);
+                
+                // 如果任务完成
+                if (data.status === 'completed') {
+                    log('✓ 分析完成！');
+                    eventSource.close();
+                    showResults(data.result);
+                    document.getElementById('analyzeBtn').disabled = false;
+                }
+                
+                // 如果任务失败
+                if (data.status === 'failed') {
+                    log(`✗ 分析失败: ${data.error}`);
+                    eventSource.close();
+                    updateStatus(`失败: ${data.error}`, 'error');
+                    document.getElementById('analyzeBtn').disabled = false;
+                }
+            };
+            
+            eventSource.onerror = function(error) {
+                log('✗ SSE连接错误');
+                console.error('SSE Error:', error);
+                eventSource.close();
+                document.getElementById('analyzeBtn').disabled = false;
+            };
+        }
+        
+        function updateProgress(percent) {
+            const progressBar = document.getElementById('progressBar');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = percent.toFixed(1) + '%';
+        }
+        
+        function updateStatus(message, status = 'info') {
+            const statusMessage = document.getElementById('statusMessage');
+            statusMessage.textContent = message;
+            statusMessage.className = 'status-message';
+            if (status === 'error' || status === 'failed') {
+                statusMessage.classList.add('error');
+            } else if (status === 'completed') {
+                statusMessage.classList.add('success');
+            }
+        }
+        
+        function showResults(result) {
+            const resultSection = document.getElementById('resultSection');
+            const resultContent = document.getElementById('resultContent');
+            
+            if (!result || !result.matrix) {
+                resultContent.innerHTML = '<p>没有提取到需求</p>';
+                resultSection.style.display = 'block';
+                return;
+            }
+            
+            const matrix = result.matrix;
+            let html = `
+                <h4>共提取 ${result.requirements_count} 条需求</h4>
+                <p style="color: #666; margin: 10px 0;">以下显示全部需求</p>
+            `;
+            
+            // 显示所有需求
+            matrix.forEach((req, index) => {
+                html += `
+                    <div class="requirement-item">
+                        <strong>${index + 1}. ${req.matrix_id}: ${req.requirement}</strong>
+                        <br>
+                        <small style="color: #666;">
+                            📖 章节: ${req.section_id} - ${req.section_title} | 
+                            📄 页码: ${req.page_number}
+                        </small>
+                        <br>
+                        <em style="color: #888;">原文: ${req.original_text.substring(0, 120)}${req.original_text.length > 120 ? '...' : ''}</em>
+                        <br>
+                        <div style="margin-top: 8px; padding: 8px; background-color: #f0f8ff; border-radius: 4px;">
+                            <small>
+                                <strong>💡 应答方向:</strong> ${req.response_suggestion}<br>
+                                <strong>⚠️ 风险提示:</strong> ${req.risk_warning}<br>
+                                <strong>📝 备注:</strong> ${req.notes}
+                            </small>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            resultContent.innerHTML = html;
+            resultSection.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
+
