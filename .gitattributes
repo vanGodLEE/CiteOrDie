@@ -1,0 +1,39 @@
+# 自动规范化行尾符
+* text=auto
+
+# Python文件
+*.py text eol=lf
+*.pyw text eol=lf
+
+# 配置文件
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.ini text eol=lf
+*.cfg text eol=lf
+
+# 文档
+*.md text eol=lf
+*.txt text eol=lf
+
+# Shell脚本
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# Web文件
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# 二进制文件
+*.pdf binary
+*.db binary
+*.sqlite binary
+*.pyc binary
+*.pyo binary
+*.so binary
+*.dll binary
+*.dylib binary
+*.exe binary
+
