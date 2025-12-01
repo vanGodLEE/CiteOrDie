@@ -313,45 +313,96 @@ class PDFParserService:
         section_plan
     ) -> List[ContentBlock]:
         """
-        获取指定章节的内容块
+        获取指定章节及其相邻章节的内容块（3个标题上下文策略）
         
-        新逻辑（基于标题索引）：
-        从start_index开始，收集所有内容块，直到遇到下一个text_level=1的标题
+        新策略：
+        1. 找上一个text_level=1标题，且该标题后续有非空文本（如果没有就继续往上找）
+        2. 当前标题
+        3. 找下一个text_level=1标题，且该标题后续有非空文本（如果没有就继续往下找）
+        
+        目的：提供更大的上下文，让模型能够总结需求而不是逐条抽取
         
         Args:
             content_blocks: 所有内容块
             section_plan: SectionPlan对象（包含start_index）
             
         Returns:
-            该章节的内容块列表
+            包含相邻3个章节的内容块列表
         """
         start_index = section_plan.start_index
         
-        if start_index is None:
-            # 降级：如果没有start_index，使用旧逻辑
-            logger.warning(f"章节 {section_plan.section_id} 没有start_index，使用页码范围提取")
-            result = []
-            for block in content_blocks:
-                page_num = block.page_idx + 1
-                if page_num < section_plan.start_page:
-                    continue
-                if section_plan.end_page and page_num > section_plan.end_page:
-                    break
-                result.append(block)
-            return result
+        if start_index is None or start_index >= len(content_blocks):
+            logger.warning(f"章节 {section_plan.section_id} 索引无效")
+            return []
         
-        # 新逻辑：从start_index开始，收集到下一个标题
-        result = []
-        for i in range(start_index, len(content_blocks)):
-            block = content_blocks[i]
-            
-            # 如果是标题且不是起始标题，停止
-            # 使用getattr安全访问text_level字段
+        # 找到所有text_level=1的标题位置
+        header_indices = []
+        for i, block in enumerate(content_blocks):
             text_level = getattr(block, 'text_level', None)
-            if i > start_index and text_level == 1:
-                break
-            
-            result.append(block)
+            if text_level == 1:
+                header_indices.append(i)
         
-        logger.debug(f"章节 {section_plan.section_id} ({section_plan.title}) 提取到 {len(result)} 个内容块")
+        if not header_indices:
+            logger.warning("文档中没有找到text_level=1的标题")
+            return []
+        
+        # 找到当前标题在header_indices中的位置
+        try:
+            current_pos = header_indices.index(start_index)
+        except ValueError:
+            logger.warning(f"无法找到当前标题索引 {start_index} 在header_indices中")
+            return []
+        
+        # 辅助函数：检查某个标题后面是否有非空文本
+        def has_content_after_header(header_idx: int, next_header_idx: int) -> bool:
+            """检查header_idx到next_header_idx之间是否有实际文本内容"""
+            for i in range(header_idx + 1, min(next_header_idx, len(content_blocks))):
+                block = content_blocks[i]
+                # 检查是否有text字段且不为空
+                text = getattr(block, 'text', '').strip()
+                if text and len(text) > 0:
+                    return True
+            return False
+        
+        # 1. 找上一个有内容的标题（往上找）
+        prev_header_idx = start_index  # 默认从当前标题开始
+        for pos in range(current_pos - 1, -1, -1):  # 从当前位置往上遍历
+            candidate_idx = header_indices[pos]
+            next_idx = header_indices[pos + 1] if pos + 1 < len(header_indices) else len(content_blocks)
+            
+            if has_content_after_header(candidate_idx, next_idx):
+                prev_header_idx = candidate_idx
+                logger.debug(f"找到上一个有内容的标题，索引: {candidate_idx}")
+                break
+        
+        # 2. 当前标题（已有）
+        
+        # 3. 找下一个有内容的标题（往下找）
+        # 先找下下个标题作为结束位置
+        next_next_header_idx = len(content_blocks)  # 默认到文档末尾
+        
+        # 从当前位置的下一个标题开始往下找
+        for pos in range(current_pos + 1, len(header_indices)):
+            candidate_idx = header_indices[pos]
+            next_idx = header_indices[pos + 1] if pos + 1 < len(header_indices) else len(content_blocks)
+            
+            if has_content_after_header(candidate_idx, next_idx):
+                # 找到第一个有内容的标题后，再找下一个标题作为结束位置
+                if pos + 1 < len(header_indices):
+                    next_next_header_idx = header_indices[pos + 1]
+                else:
+                    next_next_header_idx = len(content_blocks)
+                logger.debug(f"找到下一个有内容的标题，索引: {candidate_idx}，结束位置: {next_next_header_idx}")
+                break
+        
+        # 收集从prev_header_idx到next_next_header_idx之间的所有内容块
+        result = content_blocks[prev_header_idx:next_next_header_idx]
+        
+        # 统计包含的标题数和实际文本块数
+        included_headers = sum(1 for block in result if getattr(block, 'text_level', None) == 1)
+        text_blocks = sum(1 for block in result if getattr(block, 'text', '').strip())
+        
+        logger.debug(f"章节 {section_plan.section_id} ({section_plan.title}) "
+                    f"提取到 {len(result)} 个内容块，包含 {included_headers} 个标题，{text_blocks} 个文本块（3标题上下文）")
+        
         return result
