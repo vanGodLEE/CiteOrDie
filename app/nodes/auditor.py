@@ -94,8 +94,8 @@ def _deduplicate_requirements(requirements: List[RequirementItem]) -> List[Requi
                 
                 # 如果相似度超过阈值，保留第一个
                 if similarity_matrix[i, j] >= similarity_threshold:
-                    to_keep[j] = False
-                    logger.debug(f"去重：移除相似需求 {requirements[j].matrix_id}")
+                        to_keep[j] = False
+                        logger.debug(f"去重：移除相似需求 {requirements[j].matrix_id}")
         
         deduplicated = [req for i, req in enumerate(requirements) if to_keep[i]]
         removed_count = len(requirements) - len(deduplicated)

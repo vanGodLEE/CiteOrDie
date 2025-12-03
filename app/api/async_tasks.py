@@ -152,6 +152,17 @@ class TaskManager:
         return task_store.get(task_id)
     
     @staticmethod
+    def log_progress(task_id: str, message: str, progress: float = None):
+        """
+        记录任务进度日志（便捷方法）
+        """
+        TaskManager.update_task(
+            task_id=task_id,
+            progress=progress,
+            message=message
+        )
+    
+    @staticmethod
     def delete_task(task_id: str):
         """删除任务（仅清理内存，保留数据库记录）"""
         if task_id in task_store:

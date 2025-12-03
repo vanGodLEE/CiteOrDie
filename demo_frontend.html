@@ -16,7 +16,7 @@
             background: white;
             padding: 30px;
             border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);·
         }
         h1 {
             color: #333;
@@ -102,6 +102,18 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         }
+        .tree-container {
+            margin-top: 20px;
+        }
+        .tree-node {
+            margin-bottom: 15px;
+        }
+        .node-title {
+            font-weight: bold;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+        }
         .log {
             background-color: #263238;
             color: #00ff00;
@@ -118,16 +130,14 @@
 <body>
     <div class="container">
         <h1>🚀 智能招标书分析系统</h1>
-        <p>需求拆解</p>
+        <p>基于PageIndex的需求自动提取 | 支持实时进度跟踪</p>
         
         <!-- 上传区域 -->
         <div class="upload-section">
             <h3>上传招标PDF文档</h3>
             <input type="file" id="pdfFile" accept=".pdf">
             <br>
-            <label>
-                <input type="checkbox" id="useMock"> 使用Mock数据（无需上传PDF）
-            </label>
+            <small style="color: #666;">支持PDF格式，基于PageIndex解析</small>
             <br><br>
             <button id="analyzeBtn" onclick="startAnalysis()">开始分析</button>
         </div>
@@ -149,7 +159,8 @@
         
         <!-- 日志区域 -->
         <div class="log" id="logArea">
-            [系统] 等待开始分析...\n
+            [系统] 智能招标分析系统已就绪（PageIndex版本）\n
+            [提示] 请选择PDF文件开始分析...\n
         </div>
     </div>
 
@@ -165,12 +176,19 @@
         
         async function startAnalysis() {
             const fileInput = document.getElementById('pdfFile');
-            const useMock = document.getElementById('useMock').checked;
             const analyzeBtn = document.getElementById('analyzeBtn');
             
             // 验证输入
-            if (!useMock && !fileInput.files[0]) {
-                alert('请选择PDF文件或勾选使用Mock数据');
+            if (!fileInput.files[0]) {
+                alert('请选择PDF文件');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            
+            // 验证文件类型
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                alert('只支持PDF文件！');
                 return;
             }
             
@@ -186,26 +204,10 @@
             try {
                 // 构建表单数据
                 const formData = new FormData();
+                formData.append('file', file);
                 
-                if (useMock) {
-                    // Mock模式：创建一个有效的假文件
-                    const blob = new Blob(['%PDF-1.4 Mock PDF for testing'], {type: 'application/pdf'});
-                    formData.append('file', blob, 'mock.pdf');
-                    formData.append('use_mock', 'true');
-                } else {
-                    // 真实模式：上传用户选择的文件
-                    const file = fileInput.files[0];
-                    if (!file) {
-                        alert('请选择PDF文件');
-                        analyzeBtn.disabled = false;
-                        return;
-                    }
-                    formData.append('file', file);
-                    formData.append('use_mock', 'false');
-                }
-                
-                // 发送异步分析请求
-                const response = await fetch('http://localhost:8000/analyze/async', {
+                // 发送分析请求（PageIndex API）
+                const response = await fetch('http://localhost:8000/analyze', {
                     method: 'POST',
                     body: formData
                 });
@@ -213,12 +215,12 @@
                 const data = await response.json();
                 
                 if (!response.ok) {
-                    throw new Error(data.detail || '请求失败');
+                    throw new Error(data.message || data.detail || '请求失败');
                 }
                 
                 const taskId = data.task_id;
                 log(`✓ 任务已创建: ${taskId}`);
-                log(`🔗 开始监听进度更新...`);
+                log(`🔗 开始监听进度更新（PageIndex模式）...`);
                 
                 // 连接SSE监听进度
                 connectSSE(taskId);
@@ -231,8 +233,8 @@
         }
         
         function connectSSE(taskId) {
-            // 创建EventSource连接
-            eventSource = new EventSource(`http://localhost:8000/analyze/progress/${taskId}`);
+            // 创建EventSource连接（PageIndex API）
+            eventSource = new EventSource(`http://localhost:8000/progress/${taskId}`);
             
             eventSource.onmessage = function(event) {
                 const data = JSON.parse(event.data);
@@ -248,9 +250,9 @@
                 
                 // 如果任务完成
                 if (data.status === 'completed') {
-                    log('✓ 分析完成！');
+                    log('✓ 分析完成！正在获取结果...');
                     eventSource.close();
-                    showResults(data.result);
+                    fetchResults(taskId);
                     document.getElementById('analyzeBtn').disabled = false;
                 }
                 
@@ -271,6 +273,21 @@
             };
         }
         
+        async function fetchResults(taskId) {
+            try {
+                const response = await fetch(`http://localhost:8000/task/${taskId}`);
+                const data = await response.json();
+                
+                if (data.status === 'completed' && data.matrix) {
+                    showResults(data);
+                } else {
+                    log(`⚠️ 任务状态: ${data.status}, 消息: ${data.message}`);
+                }
+            } catch (error) {
+                log(`✗ 获取结果失败: ${error.message}`);
+            }
+        }
+        
         function updateProgress(percent) {
             const progressBar = document.getElementById('progressBar');
             progressBar.style.width = percent + '%';
@@ -288,48 +305,127 @@
             }
         }
         
-        function showResults(result) {
+        function showResults(data) {
             const resultSection = document.getElementById('resultSection');
             const resultContent = document.getElementById('resultContent');
             
-            if (!result || !result.matrix) {
+            if (!data || !data.matrix || data.matrix.length === 0) {
                 resultContent.innerHTML = '<p>没有提取到需求</p>';
                 resultSection.style.display = 'block';
                 return;
             }
             
-            const matrix = result.matrix;
+            const matrix = data.matrix;
+            const count = data.requirements_count || matrix.length;
+            const documentTree = data.document_tree;
+            
+            log(`✓ 显示 ${count} 条需求`);
+            
             let html = `
-                <h4>共提取 ${result.requirements_count} 条需求</h4>
-                <p style="color: #666; margin: 10px 0;">以下显示全部需求</p>
+                <h4>共提取 ${count} 条需求</h4>
+                <p style="color: #666; margin: 10px 0;">按文档结构树展示需求（基于PageIndex解析）</p>
             `;
             
-            // 显示所有需求
-            matrix.forEach((req, index) => {
-                html += `
-                    <div class="requirement-item">
-                        <strong>${index + 1}. ${req.matrix_id}: ${req.requirement}</strong>
-                        <br>
-                        <small style="color: #666;">
-                            📖 章节: ${req.section_id} - ${req.section_title} | 
-                            📄 页码: ${req.page_number}
-                        </small>
-                        <br>
-                        <em style="color: #888;">原文: ${req.original_text.substring(0, 120)}${req.original_text.length > 120 ? '...' : ''}</em>
-                        <br>
-                        <div style="margin-top: 8px; padding: 8px; background-color: #f0f8ff; border-radius: 4px;">
-                            <small>
-                                <strong>💡 应答方向:</strong> ${req.response_suggestion}<br>
-                                <strong>⚠️ 风险提示:</strong> ${req.risk_warning}<br>
-                                <strong>📝 备注:</strong> ${req.notes}
-                            </small>
-                        </div>
-                    </div>
-                `;
-            });
+            // 如果有树结构，按树状展示
+            if (documentTree && documentTree.structure) {
+                html += '<div class="tree-container">';
+                html += `<h5 style="color: #1976d2;">📄 ${documentTree.doc_name || '文档'}</h5>`;
+                
+                // 递归渲染树结构
+                documentTree.structure.forEach(node => {
+                    html += renderTreeNode(node, matrix, 0);
+                });
+                
+                html += '</div>';
+            } else {
+                // 降级：按扁平列表展示
+                html += '<p style="color: #f57c00;">⚠️ 未获取到树结构，使用列表模式展示</p>';
+                matrix.forEach((req, index) => {
+                    html += renderRequirementItem(req, index);
+                });
+            }
             
             resultContent.innerHTML = html;
             resultSection.style.display = 'block';
+        }
+        
+        function renderTreeNode(node, matrix, level) {
+            const indent = level * 20;
+            let html = '';
+            
+            // 节点标题样式
+            const titleStyle = `
+                margin-left: ${indent}px;
+                padding: 10px;
+                background: ${level === 0 ? '#e3f2fd' : (level === 1 ? '#f3e5f5' : '#fff3e0')};
+                border-left: 4px solid ${level === 0 ? '#2196F3' : (level === 1 ? '#9C27B0' : '#FF9800')};
+                border-radius: 4px;
+                margin-top: 10px;
+                font-weight: ${level === 0 ? 'bold' : 'normal'};
+            `;
+            
+            html += `
+                <div style="${titleStyle}">
+                    ${'📁'.repeat(level + 1)} ${node.title || '未命名节点'}
+                    <small style="color: #666; margin-left: 10px;">
+                        [ID: ${node.node_id || 'N/A'}] 
+                        [页码: ${node.start_index}-${node.end_index}]
+                    </small>
+                </div>
+            `;
+            
+            // 显示该节点下的需求
+            if (node.requirements && node.requirements.length > 0) {
+                node.requirements.forEach((req, index) => {
+                    html += `
+                        <div class="requirement-item" style="margin-left: ${indent + 20}px; margin-top: 8px;">
+                            <strong>📌 ${req.matrix_id}: ${req.requirement}</strong>
+                            <br>
+                            <small style="color: #666;">📄 页码: ${req.page_number}</small>
+                            <br>
+                            <em style="color: #888;">原文: ${req.original_text.substring(0, 120)}${req.original_text.length > 120 ? '...' : ''}</em>
+                            <br>
+                            <div style="margin-top: 6px; padding: 6px; background-color: #f0f8ff; border-radius: 4px; font-size: 12px;">
+                                <strong>💡 应答:</strong> ${req.response_suggestion}<br>
+                                <strong>⚠️ 风险:</strong> ${req.risk_warning}<br>
+                                <strong>📝 备注:</strong> ${req.notes}
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            // 递归渲染子节点
+            if (node.nodes && node.nodes.length > 0) {
+                node.nodes.forEach(childNode => {
+                    html += renderTreeNode(childNode, matrix, level + 1);
+                });
+            }
+            
+            return html;
+        }
+        
+        function renderRequirementItem(req, index) {
+            return `
+                <div class="requirement-item">
+                    <strong>${index + 1}. ${req.matrix_id}: ${req.requirement}</strong>
+                    <br>
+                    <small style="color: #666;">
+                        📖 章节: ${req.section_id} - ${req.section_title} | 
+                        📄 页码: ${req.page_number}
+                    </small>
+                    <br>
+                    <em style="color: #888;">原文: ${req.original_text.substring(0, 120)}${req.original_text.length > 120 ? '...' : ''}</em>
+                    <br>
+                    <div style="margin-top: 8px; padding: 8px; background-color: #f0f8ff; border-radius: 4px;">
+                        <small>
+                            <strong>💡 应答方向:</strong> ${req.response_suggestion}<br>
+                            <strong>⚠️ 风险提示:</strong> ${req.risk_warning}<br>
+                            <strong>📝 备注:</strong> ${req.notes}
+                        </small>
+                    </div>
+                </div>
+            `;
         }
     </script>
 </body>

@@ -32,7 +32,7 @@ class LLMService:
             self.client = OpenAI(
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_api_base,
-                timeout=60.0,  # 60秒超时
+                timeout=600.0,
                 max_retries=2
             )
             self.model = settings.deepseek_model
@@ -49,7 +49,7 @@ class LLMService:
             self.client = OpenAI(
                 api_key=settings.openai_api_key,
                 base_url=settings.openai_api_base,
-                timeout=60.0,  # 60秒超时
+                timeout=600.0,
                 max_retries=2
             )
             self.model = settings.openai_model
@@ -66,7 +66,8 @@ class LLMService:
         messages: List[dict],
         response_model: Type[T],
         temperature: float = 0.2,
-        max_retries: int = 3
+        max_retries: int = 3,
+        model: Optional[str] = None
     ) -> T:
         """
         使用Structured Output进行LLM调用
@@ -76,18 +77,38 @@ class LLMService:
             response_model: Pydantic模型类（用于结构化输出）
             temperature: 温度参数
             max_retries: 最大重试次数
+            model: 可选的模型名称，格式：
+                   - "provider:model_name" 如 "deepseek:deepseek-reasoner"
+                   - None 使用默认模型
             
         Returns:
             解析后的Pydantic模型实例
         """
+        # 解析model参数
+        if model:
+            # 格式：provider:model_name 或 直接使用model_name
+            if ":" in model:
+                model_provider, model_name = model.split(":", 1)
+                model_provider = model_provider.lower()
+            else:
+                # 使用默认provider
+                model_provider = self.provider
+                model_name = model
+        else:
+            # 使用默认配置
+            model_provider = self.provider
+            model_name = self.model
+        
+        logger.debug(f"LLM调用配置: provider={model_provider}, model={model_name}")
+        
         for attempt in range(max_retries):
             try:
                 logger.debug(f"LLM调用开始 (尝试 {attempt + 1}/{max_retries})")
                 
-                if self.provider == "openai":
+                if model_provider == "openai":
                     # OpenAI: 使用Structured Output API
                     response = self.client.beta.chat.completions.parse(
-                        model=self.model,
+                        model=model_name,
                         messages=messages,
                         response_format=response_model,
                         temperature=temperature
@@ -113,7 +134,7 @@ class LLMService:
                         })
                     
                     response = self.client.chat.completions.create(
-                        model=self.model,
+                        model=model_name,
                         messages=enhanced_messages,
                         response_format={"type": "json_object"},
                         temperature=temperature
@@ -187,4 +208,14 @@ class LLMService:
 
 
 # 全局LLM服务实例
-llm_service = LLMService()
+_llm_service: LLMService = None
+
+
+def get_llm_service() -> LLMService:
+    """
+    获取全局LLM服务实例（单例模式）
+    """
+    global _llm_service
+    if _llm_service is None:
+        _llm_service = LLMService()
+    return _llm_service

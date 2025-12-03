@@ -1,21 +1,20 @@
 """
 LangGraph工作流定义
 
-构建招标分析的完整工作流：
-Planner → Map(Extractors) → Auditor
+构建基于PageIndex的招标分析工作流：
+pageindex_parser → Map(Enrichers) → Auditor
 """
 
 import time
-from typing import List
+from typing import List, Dict, Any
 from loguru import logger
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
 
-from app.core.states import TenderAnalysisState, SectionState
-from app.nodes.planner import planner_node
-from app.nodes.extractor import extractor_node
+from app.core.states import TenderAnalysisState, SectionState, PageIndexNode
+from app.nodes.pageindex_parser import pageindex_parser_node
+from app.nodes.pageindex_enricher import pageindex_enricher_node
 from app.nodes.auditor import auditor_node
-from app.services.pdf_parser import PDFParserService
 
 
 def create_tender_analysis_graph():
@@ -23,111 +22,149 @@ def create_tender_analysis_graph():
     创建招标分析工作流图
     
     工作流拓扑：
-    START → parse_pdf → planner → [extractor_1, extractor_2, ...] → auditor → END
+    START → pageindex_parser → [enricher_1, enricher_2, ...] → auditor → END
     
     关键点：
-    1. parse_pdf: 解析PDF文档（或读取Mock数据）
-    2. planner: 识别关键章节
-    3. extractors (并行): 每个章节一个Worker
-    4. auditor: 汇总、去重、排序
+    1. pageindex_parser: 调用PageIndex解析PDF，生成文档树
+    2. enrichers (并行): 为每个叶子节点提取需求
+    3. auditor: 汇总所有需求，生成最终矩阵
     """
     # 创建状态图
     workflow = StateGraph(TenderAnalysisState)
     
     # 添加节点
-    workflow.add_node("parse_pdf", parse_pdf_node)
-    workflow.add_node("planner", planner_node)
-    workflow.add_node("extractor", extractor_node)
+    workflow.add_node("pageindex_parser", pageindex_parser_node)
+    workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
     
     # 连接边
-    workflow.add_edge(START, "parse_pdf")
-    workflow.add_edge("parse_pdf", "planner")
+    workflow.add_edge(START, "pageindex_parser")
     
-    # 动态Map：为每个target_section创建一个Send到extractor
-    workflow.add_conditional_edges("planner", route_to_extractors)
+    # 动态Map：为每个叶子节点创建一个Send到enricher
+    workflow.add_conditional_edges("pageindex_parser", route_to_enrichers)
     
-    # 所有extractor完成后，汇总到auditor
-    workflow.add_edge("extractor", "auditor")
+    # 所有enricher完成后，汇总到auditor
+    workflow.add_edge("enricher", "auditor")
     workflow.add_edge("auditor", END)
     
     # 编译图
     graph = workflow.compile()
-    logger.info("LangGraph工作流图构建完成")
+    logger.info("招标分析工作流图构建完成（PageIndex架构）")
     
     return graph
 
 
-def parse_pdf_node(state: TenderAnalysisState) -> dict:
+def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
     """
-    PDF解析节点
+    动态路由：为每个需要处理的节点创建一个Send对象
     
-    负责调用MinerU解析PDF（或读取Mock数据）
+    策略：处理所有叶子节点（最细粒度）
     """
-    logger.info("====== PDF解析节点开始执行 ======")
+    pageindex_doc = state.get("pageindex_document")
+    task_id = state.get("task_id")
     
-    pdf_path = state["pdf_path"]
-    use_mock = state.get("use_mock", False)
-    
-    parser = PDFParserService()
-    parsed_doc = parser.parse_pdf(pdf_path, use_mock=use_mock)
-    
-    logger.info(f"PDF解析完成: {len(parsed_doc.content_list)} 个内容块, {len(parsed_doc.toc)} 个目录项")
-    
-    return {
-        "content_list": [block.dict() for block in parsed_doc.content_list],
-        "markdown": parsed_doc.markdown,
-        "toc": parsed_doc.toc,
-        "processing_start_time": time.time()
-    }
-
-
-
-def route_to_extractors(state: TenderAnalysisState) -> List[Send]:
-    """
-    动态路由：为每个target_section创建一个Send对象
-    
-    这是LangGraph的Map操作核心！
-    每个Send对象会启动一个独立的extractor节点实例
-    """
-    target_sections = state.get("target_sections", [])
-    
-    if not target_sections:
-        logger.warning("Planner没有识别出任何关键章节，跳过提取步骤")
-        # 返回空列表，直接进入auditor
+    if not pageindex_doc:
+        logger.warning("未找到pageindex_document，无法路由到enrichers")
         return []
     
-    logger.info(f"准备启动 {len(target_sections)} 个并行Extractor Worker")
+    # 获取所有叶子节点
+    leaf_nodes = pageindex_doc.get_all_leaf_nodes()
     
+    if not leaf_nodes:
+        logger.warning("未找到叶子节点，无法路由到enrichers")
+        return []
+    
+    logger.info(f"准备并行处理 {len(leaf_nodes)} 个叶子节点")
+    
+    # 为每个叶子节点创建一个Send
     sends = []
-    parser = PDFParserService()
-    
-    for section_plan in target_sections:
-        # 从content_list中提取该章节的内容
-        # 注意：content_list在state中是Dict格式，需要转回ContentBlock
-        from app.core.states import ContentBlock
-        content_blocks = [
-            ContentBlock(**block) 
-            for block in state["content_list"]
-        ]
-        
-        section_content = parser.get_section_content(
-            content_blocks,
-            section_plan
-        )
+    for node in leaf_nodes:
+        # 构建节点路径
+        node.path = f"{node.node_id or 'UNKNOWN'}: {node.title}"
         
         # 创建SectionState
         section_state = SectionState(
-            section_id=section_plan.section_id,
-            section_title=section_plan.title,
-            section_plan=section_plan,
-            content_blocks=section_content,
-            requirements=[],  # 初始化为空列表
-            task_id=state.get("task_id")  # 传递task_id用于进度更新
+            pageindex_node=node,
+            task_id=task_id,
+            section_node=None,
+            content_blocks=None,
+            section_id=node.node_id,
+            section_title=node.title,
+            section_plan=None,
+            requirements=[]
         )
         
         # 创建Send对象
-        sends.append(Send("extractor", section_state))
+        sends.append(Send("enricher", section_state))
+        
+        logger.debug(f"  - 路由节点: {node.path} (页码: {node.start_index}-{node.end_index})")
     
-    logger.info(f"创建了 {len(sends)} 个Send对象，准备并行执行")
+    logger.info(f"✓ 路由完成，将并行执行 {len(sends)} 个enricher任务")
+    
     return sends
+
+
+def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
+    """
+    执行分析工作流
+    
+    Args:
+        pdf_path: PDF文件路径
+        task_id: 任务ID（用于进度更新）
+        
+    Returns:
+        分析结果字典
+    """
+    logger.info(f"开始分析: {pdf_path}")
+    
+    # 创建工作流图
+    graph = create_tender_analysis_graph()
+    
+    # 初始化状态
+    initial_state: TenderAnalysisState = {
+        "pdf_path": pdf_path,
+        "use_mock": False,
+        "task_id": task_id,
+        "pageindex_document": None,
+        "content_list": [],
+        "markdown": "",
+        "toc": [],
+        "toc_tree": None,
+        "target_sections": [],
+        "requirements": [],
+        "final_matrix": [],
+        "processing_start_time": time.time(),
+        "processing_end_time": None,
+        "error_message": None
+    }
+    
+    try:
+        # 执行工作流
+        final_state = graph.invoke(initial_state)
+        
+        # 记录结果
+        processing_time = final_state.get("processing_end_time", time.time()) - final_state.get("processing_start_time", 0)
+        requirements_count = len(final_state.get("final_matrix", []))
+        
+        logger.info(f"✓ 分析完成")
+        logger.info(f"  - 处理时间: {processing_time:.2f}秒")
+        logger.info(f"  - 需求总数: {requirements_count}条")
+        
+        return {
+            "status": "success",
+            "requirements_count": requirements_count,
+            "matrix": final_state.get("final_matrix", []),
+            "processing_time": processing_time,
+            "pageindex_document": final_state.get("pageindex_document")
+        }
+        
+    except Exception as e:
+        logger.error(f"分析失败: {str(e)}")
+        return {
+            "status": "error",
+            "error_message": str(e),
+            "requirements_count": 0,
+            "matrix": [],
+            "processing_time": 0
+        }
+

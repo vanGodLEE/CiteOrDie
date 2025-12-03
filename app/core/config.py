@@ -44,14 +44,22 @@ class Settings(BaseSettings):
         description="DeepSeek模型名称"
     )
     
-    # ==================== MinerU配置 ====================
-    mineru_command: str = Field(
-        default="mineru",
-        description="MinerU命令行工具名称"
+    # ==================== 节点级LLM配置 ====================
+    # 每个LangGraph节点可以使用不同的模型
+    
+    structurizer_model: str = Field(
+        default="deepseek-chat",
+        description="PageIndex解析使用的模型"
     )
-    mineru_output_dir: str = Field(
-        default="./temp/mineru_output",
-        description="MinerU输出目录"
+    
+    extractor_model: str = Field(
+        default="deepseek-chat",
+        description="Extractor节点使用的模型"
+    )
+    
+    auditor_model: str = Field(
+        default="deepseek-chat",
+        description="Auditor节点使用的模型"
     )
     
     # ==================== 应用配置 ====================

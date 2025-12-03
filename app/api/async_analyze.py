@@ -1,29 +1,26 @@
 """
 异步分析API - 支持SSE进度推送
-
-提供类似RagFlow的实时进度反馈
+基于PageIndex的PDF文档分析
 """
 
 import json
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, File, UploadFile, Form, BackgroundTasks
+from datetime import datetime
+from fastapi import APIRouter, File, UploadFile, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
 from app.api.async_tasks import TaskManager
 from app.core.graph import create_tender_analysis_graph
 from app.core.states import TenderAnalysisState
-from app.core.config import settings
 
 router = APIRouter()
 
 
-async def run_analysis_task(task_id: str, pdf_path: str, use_mock: bool):
+async def run_analysis_task(task_id: str, pdf_path: str):
     """
     后台任务：执行分析流程
-    
-    在执行过程中更新任务状态
     """
     try:
         # 更新状态：开始运行
@@ -34,21 +31,16 @@ async def run_analysis_task(task_id: str, pdf_path: str, use_mock: bool):
             message="开始分析..."
         )
         
-        # 阶段1: PDF解析 (0-50%)
-        TaskManager.update_task(
-            task_id,
-            progress=5,
-            message="正在解析PDF文档..."
-        )
-        
         # 创建初始状态
         initial_state = TenderAnalysisState(
             pdf_path=pdf_path,
-            use_mock=use_mock,
-            task_id=task_id,  # 传入task_id，用于进度更新
+            use_mock=False,
+            task_id=task_id,
+            pageindex_document=None,
             content_list=[],
             markdown="",
             toc=[],
+            toc_tree=None,
             target_sections=[],
             requirements=[],
             final_matrix=[],
@@ -57,79 +49,71 @@ async def run_analysis_task(task_id: str, pdf_path: str, use_mock: bool):
             error_message=None
         )
         
-        TaskManager.update_task(
-            task_id,
-            progress=10,
-            message="正在调用MinerU解析PDF（这可能需要5-10分钟，请耐心等待）..."
-        )
-        
         # 创建工作流图
         graph = create_tender_analysis_graph()
         
-        # 在后台线程中执行（避免阻塞事件循环）
-        import asyncio
+        # 在后台线程中执行
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(None, graph.invoke, initial_state)
         
-        # 阶段2: 需求提取 (60-85%)
-        TaskManager.update_task(
-            task_id,
-            progress=65,
-            message="正在分析章节并提取需求条款..."
-        )
+        # 检查是否有错误
+        if result.get("error_message"):
+            raise Exception(result["error_message"])
         
-        # 阶段3: 质量检查 (85-100%)
-        TaskManager.update_task(
-            task_id,
-            progress=92,
-            message="正在进行质量检查和去重..."
-        )
-        
-        # 完成
+        # 获取最终结果
         final_matrix = result.get("final_matrix", [])
-        target_sections = result.get("target_sections", [])
+        pageindex_doc = result.get("pageindex_document")
         
-        # 保存章节和需求到数据库
+        # 保存到数据库
+        from app.db.repositories import (
+            TaskRepository, 
+            SectionRepository, 
+            RequirementRepository
+        )
+        from app.db.database import SessionLocal
+        
+        db = SessionLocal()
         try:
-            from app.db.database import get_db_session
-            from app.db.repositories import SectionRepository, RequirementRepository, TaskRepository
-            
-            db = get_db_session()
-            
-            # 保存章节
-            if target_sections:
+            # 批量保存章节信息（从PageIndex的叶子节点）
+            if pageindex_doc:
+                leaf_nodes = pageindex_doc.get_all_leaf_nodes()
                 sections_data = [
                     {
-                        "section_id": sec.section_id,
-                        "title": sec.title,
-                        "reason": sec.reason,
-                        "priority": sec.priority,
-                        "start_page": sec.start_page,
-                        "end_page": sec.end_page,
-                        "start_index": sec.start_index
+                        "section_id": node.node_id or "UNKNOWN",
+                        "title": node.title,  # 数据库字段名是title
+                        "start_page": node.start_index,
+                        "end_page": node.end_index
                     }
-                    for sec in target_sections
+                    for node in leaf_nodes
                 ]
                 SectionRepository.batch_create_sections(db, task_id, sections_data)
             
-            # 保存需求
-            if final_matrix:
-                requirements_data = [req.dict() for req in final_matrix]
-                RequirementRepository.batch_create_requirements(db, task_id, requirements_data)
+            # 批量保存需求矩阵
+            requirements_data = [
+                {
+                    "matrix_id": req.matrix_id,
+                    "requirement": req.requirement,
+                    "original_text": req.original_text,
+                    "section_id": req.section_id,
+                    "section_title": req.section_title,
+                    "page_number": req.page_number,
+                    "response_suggestion": req.response_suggestion,
+                    "risk_warning": req.risk_warning,
+                    "notes": req.notes
+                }
+                for req in final_matrix
+            ]
+            RequirementRepository.batch_create_requirements(db, task_id, requirements_data)
             
-            # 更新统计信息
-            TaskRepository.update_task_stats(
-                db,
-                task_id=task_id,
-                total_sections=len(target_sections),
-                total_requirements=len(final_matrix)
-            )
-            
+        finally:
             db.close()
-            logger.info(f"数据库：保存章节和需求完成")
-        except Exception as e:
-            logger.error(f"保存到数据库失败: {e}")
         
+        # 将树结构转换为字典（用于JSON序列化）
+        tree_data = None
+        if pageindex_doc:
+            tree_data = pageindex_doc.model_dump()
+        
+        # 更新任务状态为完成
         TaskManager.update_task(
             task_id,
             status="completed",
@@ -137,134 +121,112 @@ async def run_analysis_task(task_id: str, pdf_path: str, use_mock: bool):
             message=f"分析完成！共提取 {len(final_matrix)} 条需求",
             result={
                 "requirements_count": len(final_matrix),
-                "matrix": [req.dict() for req in final_matrix]
+                "document_tree": tree_data  # 保存完整树结构
             }
         )
         
-        logger.info(f"任务 {task_id} 完成")
-        
     except Exception as e:
-        import traceback
-        error_detail = traceback.format_exc()
-        logger.error(f"任务 {task_id} 失败: {e}")
-        logger.error(f"详细错误:\n{error_detail}")
+        error_msg = f"分析失败: {str(e)}"
+        logger.error(error_msg)
+        logger.exception(e)
+        
         TaskManager.update_task(
             task_id,
             status="failed",
-            message=f"分析失败: {str(e)}",
-            error=str(e)
+            progress=0,
+            message=error_msg
         )
 
 
-@router.post("/analyze/async")
-async def analyze_async(
+@router.post("/analyze")
+async def analyze_tender(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    use_mock: bool = Form(default=False)
+    file: UploadFile = File(...)
 ):
     """
-    异步分析接口
+    分析PDF文件
     
-    立即返回task_id，客户端通过SSE接口监听进度
+    返回task_id，客户端使用task_id订阅SSE进度
     """
+    # 验证文件类型
+    if not file.filename.lower().endswith('.pdf'):
+        return {
+            "status": "error",
+            "message": "只支持PDF文件"
+        }
+    
     # 保存上传的文件
-    import uuid
-    from pathlib import Path
-    from app.core.config import settings
+    upload_dir = Path("temp/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
     
-    # 创建临时目录
-    temp_dir = Path(settings.temp_dir)
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    file_path = upload_dir / file.filename
     
-    # 生成唯一文件名并保存
-    file_id = uuid.uuid4().hex[:8]
-    file_extension = Path(file.filename).suffix if file.filename else ".pdf"
-    save_path = temp_dir / f"upload_{file_id}{file_extension}"
-    
-    # 读取文件内容
-    content = await file.read()
-    
-    # 验证文件不为空
-    if not content or len(content) == 0:
-        raise ValueError(f"上传的文件为空: {file.filename}")
-    
-    # 保存文件
-    with open(save_path, "wb") as f:
+    with open(file_path, "wb") as f:
+        content = await file.read()
         f.write(content)
     
-    # 创建任务（带文件信息）
+    logger.info(f"文件已保存: {file_path}")
+    
+    # 创建任务
     task_id = TaskManager.create_task(
-        file_name=file.filename or "unknown.pdf",
-        file_size=len(content),
-        pdf_path=str(save_path),
-        use_mock=use_mock
+        pdf_path=str(file_path),
+        file_name=file.filename,
+        file_size=len(content)
     )
     
-    logger.info(f"文件已保存: {save_path} ({len(content)} bytes)")
-    
-    pdf_path = str(save_path)
-    
-    # 添加后台任务
-    background_tasks.add_task(run_analysis_task, task_id, pdf_path, use_mock)
+    # 启动后台任务
+    background_tasks.add_task(
+        run_analysis_task,
+        task_id=task_id,
+        pdf_path=str(file_path)
+    )
     
     return {
+        "status": "success",
         "task_id": task_id,
-        "message": "任务已创建，请通过SSE接口监听进度",
-        "sse_url": f"/analyze/progress/{task_id}"
+        "message": "任务已创建，请使用task_id订阅进度"
     }
 
 
-@router.get("/analyze/progress/{task_id}")
-async def stream_progress(task_id: str):
+@router.get("/progress/{task_id}")
+async def get_progress(task_id: str):
     """
-    SSE端点：实时推送任务进度
-    
-    客户端使用EventSource连接此端点
-    
-    示例：
-    const eventSource = new EventSource('/analyze/progress/task-id');
-    eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log(data.progress, data.message);
-    };
+    获取分析进度（SSE）
     """
     async def event_generator():
         """生成SSE事件流"""
-        try:
-            last_progress = -1
-            
-            while True:
-                task = TaskManager.get_task(task_id)
-                
-                if task is None:
-                    yield f"data: {json.dumps({'error': '任务不存在'})}\n\n"
-                    break
-                
-                # 只在进度变化时发送
-                if task["progress"] != last_progress:
-                    yield f"data: {json.dumps({
-                        'task_id': task_id,
-                        'status': task['status'],
-                        'progress': task['progress'],
-                        'message': task['message'],
-                        'result': task.get('result'),
-                        'error': task.get('error')
-                    })}\n\n"
-                    
-                    last_progress = task["progress"]
-                
-                # 任务完成或失败时结束流
-                if task["status"] in ["completed", "failed"]:
-                    break
-                
-                # 每秒轮询一次
-                await asyncio.sleep(1)
+        last_progress = -1
+        retry_count = 0
+        max_retries = 600  # 最多等待10分钟
         
-        except asyncio.CancelledError:
-            logger.info(f"SSE连接断开: {task_id}")
-        except Exception as e:
-            logger.error(f"SSE错误: {e}")
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        while retry_count < max_retries:
+            task = TaskManager.get_task(task_id)
+            
+            if not task:
+                yield f"data: {json.dumps({'error': '任务不存在'}, ensure_ascii=False)}\n\n"
+                break
+            
+            # 只在进度变化时推送
+            current_progress = task["progress"]
+            if current_progress != last_progress:
+                # 转换datetime为字符串以支持JSON序列化
+                serializable_task = {
+                    **task,
+                    "created_at": task["created_at"].isoformat() if isinstance(task.get("created_at"), datetime) else task.get("created_at"),
+                    "updated_at": task["updated_at"].isoformat() if isinstance(task.get("updated_at"), datetime) else task.get("updated_at")
+                }
+                yield f"data: {json.dumps(serializable_task, ensure_ascii=False)}\n\n"
+                last_progress = current_progress
+            
+            # 任务完成或失败，结束流
+            if task["status"] in ["completed", "failed"]:
+                break
+            
+            await asyncio.sleep(1)
+            retry_count += 1
+        
+        # 最后发送一个结束标记
+        yield f"data: {json.dumps({'status': 'done'}, ensure_ascii=False)}\n\n"
     
     return StreamingResponse(
         event_generator(),
@@ -272,22 +234,56 @@ async def stream_progress(task_id: str):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # 禁用nginx缓冲
+            "X-Accel-Buffering": "no"  # 禁用Nginx缓冲
         }
     )
 
 
-@router.get("/analyze/status/{task_id}")
-async def get_task_status(task_id: str):
+@router.get("/task/{task_id}")
+async def get_task_info(task_id: str):
     """
-    获取任务状态（轮询方式）
-    
-    如果不支持SSE，可以使用此接口轮询
+    获取任务信息（包括最终需求矩阵）
     """
     task = TaskManager.get_task(task_id)
     
-    if task is None:
-        return {"error": "任务不存在"}
+    if not task:
+        return {
+            "status": "error",
+            "message": "任务不存在"
+        }
+    
+    # 如果任务完成，从数据库读取需求矩阵
+    if task["status"] == "completed":
+        from app.db.repositories import RequirementRepository
+        from app.db.database import SessionLocal
+        
+        db = SessionLocal()
+        try:
+            requirements = RequirementRepository.get_requirements(db, task_id)
+            
+            # 转换为字典格式
+            matrix = []
+            for req in requirements:
+                matrix.append({
+                    "matrix_id": req.matrix_id,
+                    "requirement": req.requirement,
+                    "original_text": req.original_text,
+                    "section_id": req.section_id,
+                    "section_title": req.section_title,
+                    "page_number": req.page_number,
+                    "response_suggestion": req.response_suggestion,
+                    "risk_warning": req.risk_warning,
+                    "notes": req.notes
+                })
+            
+            task["matrix"] = matrix
+            task["requirements_count"] = len(matrix)
+            
+            # 如果任务result中包含document_tree，也返回
+            if task.get("result") and isinstance(task["result"], dict):
+                task["document_tree"] = task["result"].get("document_tree")
+        finally:
+            db.close()
     
     return task
 
