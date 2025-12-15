@@ -29,6 +29,9 @@ class TaskStatus(BaseModel):
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    start_time: Optional[datetime] = None  # 开始时间
+    elapsed_seconds: float = 0  # 消耗时间（秒）
+    logs: list = []  # 实时日志列表
 
 
 class TaskManager:
@@ -53,6 +56,7 @@ class TaskManager:
             task_id = str(uuid.uuid4())
         
         # 内存存储
+        now = datetime.now()
         task_store[task_id] = {
             "task_id": task_id,
             "status": "pending",
@@ -60,8 +64,11 @@ class TaskManager:
             "message": "任务已创建",
             "result": None,
             "error": None,
-            "created_at": datetime.now(),
-            "updated_at": datetime.now()
+            "created_at": now,
+            "updated_at": now,
+            "start_time": None,  # 开始时间（状态变为running时设置）
+            "elapsed_seconds": 0,
+            "logs": []  # 日志列表，最多保留50条
         }
         
         # 数据库持久化
@@ -98,6 +105,16 @@ class TaskManager:
         
         # 更新内存存储
         task = task_store[task_id]
+        now = datetime.now()
+        
+        # 状态变更为running时，记录开始时间
+        if status == "running" and task.get("start_time") is None:
+            task["start_time"] = now
+            logger.info(f"任务开始: {task_id}")
+        
+        # 计算消耗时间
+        if task.get("start_time"):
+            task["elapsed_seconds"] = (now - task["start_time"]).total_seconds()
         
         if status:
             task["status"] = status
@@ -105,12 +122,23 @@ class TaskManager:
             task["progress"] = progress
         if message:
             task["message"] = message
+            # 添加到日志列表（带时间戳）
+            log_entry = {
+                "timestamp": now.strftime("%H:%M:%S"),
+                "message": message,
+                "progress": progress if progress is not None else task.get("progress", 0)
+            }
+            task["logs"].append(log_entry)
+            # 最多保留最近50条日志
+            if len(task["logs"]) > 50:
+                task["logs"] = task["logs"][-50:]
+        
         if result is not None:
             task["result"] = result
         if error:
             task["error"] = error
         
-        task["updated_at"] = datetime.now()
+        task["updated_at"] = now
         
         # 更新数据库（异步，不阻塞主流程）
         # 使用独立Session，避免跨线程共享

@@ -37,7 +37,7 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
     if task_id:
         TaskManager.log_progress(
             task_id,
-            "正在使用PageIndex解析PDF文档结构...",
+            "正在解析PDF文档结构...",
             10
         )
     
@@ -46,21 +46,48 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
         pageindex_service = get_pageindex_service()
         
         # 解析PDF
-        logger.info(f"调用PageIndex解析: {pdf_path}")
+        logger.info(f"调用文档解析器: {pdf_path}")
         result = pageindex_service.parse_pdf(pdf_path)
         
+        # 验证返回结果
+        if not isinstance(result, dict):
+            raise ValueError(f"文档解析器返回结果类型错误: {type(result)}")
+        
+        logger.debug(f"文档解析器返回结果键: {list(result.keys())}")
+        
+        structure = result.get("structure", [])
+        logger.info(f"获取到 {len(structure)} 个顶层节点")
+        
+        if not structure:
+            logger.warning("⚠️ 文档解析器未返回任何结构节点，可能文档无法解析目录")
+            # 创建一个默认的根节点
+            structure = [{
+                "node_id": "0",
+                "title": "全文档",
+                "level": 0,
+                "start_index": 1,
+                "end_index": 999,
+                "summary": "完整文档内容",
+                "nodes": []
+            }]
+        
         # 转换为PageIndexDocument模型
-        pageindex_doc = PageIndexDocument(
-            doc_name=result.get("doc_name", ""),
-            doc_description=result.get("doc_description"),
-            structure=[PageIndexNode(**node) for node in result.get("structure", [])]
-        )
+        try:
+            pageindex_doc = PageIndexDocument(
+                doc_name=result.get("doc_name", "未知文档"),
+                doc_description=result.get("doc_description"),
+                structure=[PageIndexNode(**node) for node in structure]
+            )
+        except Exception as parse_error:
+            logger.error(f"转换文档解析器输出内容时出错: {parse_error}")
+            logger.error(f"问题节点数据: {structure[0] if structure else '无数据'}")
+            raise
         
         # 统计信息
         total_nodes = len(pageindex_service.flatten_tree_to_nodes(result.get("structure", [])))
         leaf_nodes = pageindex_doc.get_all_leaf_nodes()
         
-        logger.info(f"✓ PageIndex解析完成")
+        logger.info(f"✓ 文档解析器解析完成")
         logger.info(f"  - 文档名称: {pageindex_doc.doc_name}")
         logger.info(f"  - 总节点数: {total_nodes}")
         logger.info(f"  - 叶子节点数: {len(leaf_nodes)}")
@@ -78,7 +105,7 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
         }
         
     except Exception as e:
-        error_msg = f"PageIndex解析失败: {str(e)}"
+        error_msg = f"文档解析器解析失败: {str(e)}"
         logger.error(error_msg)
         
         if task_id:

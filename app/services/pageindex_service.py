@@ -57,9 +57,9 @@ class PageIndexService:
     def __init__(
         self,
         model: str = "deepseek-chat",
-        toc_check_pages: int = 20,
+        toc_check_pages: int = 10,
         max_pages_per_node: int = 10,
-        max_tokens_per_node: int = 20000,
+        max_tokens_per_node: int = 8000,
         add_node_id: bool = True,
         add_node_summary: bool = True,
         add_doc_description: bool = False,
@@ -116,6 +116,11 @@ class PageIndexService:
             raise ValueError("文件必须是PDF格式")
         
         try:
+            logger.info("调用PageIndex库...")
+            logger.info(f"  - 模型: {self.config.model}")
+            logger.info(f"  - 目录检查页数: {self.config.toc_check_page_num}")
+            logger.info(f"  - 每节点最大页数: {self.config.max_page_num_each_node}")
+            
             # 调用PageIndex主函数
             result = page_index(
                 doc=pdf_path,
@@ -129,14 +134,35 @@ class PageIndexService:
                 if_add_node_text=self.config.if_add_node_text
             )
             
+            logger.info(f"PageIndex返回结果类型: {type(result)}")
+            
+            if not result:
+                raise ValueError("PageIndex返回结果为空")
+            
             # 处理Unicode编码问题
             result = self._decode_unicode_recursively(result)
             
-            logger.info(f"PageIndex解析完成，文档结构节点数: {len(result.get('structure', []))}")
+            structure_count = len(result.get('structure', []))
+            logger.info(f"✓ PageIndex解析完成")
+            logger.info(f"  - 文档名称: {result.get('doc_name', '未知')}")
+            logger.info(f"  - 结构节点数: {structure_count}")
+            
+            if structure_count == 0:
+                logger.warning("⚠️ PageIndex未解析出任何结构节点")
+            
             return result
             
+        except IndexError as e:
+            logger.error(f"PageIndex解析时索引错误: {str(e)}")
+            logger.error("可能原因: PDF文档结构异常或PageIndex无法识别目录")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise Exception(f"索引错误: {str(e)}")
         except Exception as e:
             logger.error(f"PageIndex解析失败: {str(e)}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            import traceback
+            logger.error(traceback.format_exc())
             raise
 
     def _decode_unicode_recursively(self, obj: Any) -> Any:

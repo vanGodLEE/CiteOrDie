@@ -322,9 +322,33 @@ def toc_transformer(toc_content, model=None):
         if_complete = check_if_toc_transformation_is_complete(toc_content, last_complete, model)
         
 
-    last_complete = json.loads(last_complete)
+    # 尝试解析JSON，增加容错处理
+    try:
+        last_complete_parsed = json.loads(last_complete)
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON解析失败: {e}")
+        print(f"原始JSON长度: {len(last_complete)}")
+        print(f"错误位置附近的内容: {last_complete[max(0, e.pos-50):min(len(last_complete), e.pos+50)]}")
+        
+        # 尝试修复常见JSON错误
+        # 1. 移除尾部不完整的内容
+        last_bracket = last_complete.rfind('}')
+        if last_bracket != -1:
+            last_complete_fixed = last_complete[:last_bracket+1]
+            try:
+                last_complete_parsed = json.loads(last_complete_fixed)
+                print("✅ 通过截断修复成功")
+            except:
+                # 2. 尝试移除换行和多余空格
+                last_complete_fixed = ' '.join(last_complete.split())
+                try:
+                    last_complete_parsed = json.loads(last_complete_fixed)
+                    print("✅ 通过清理空格修复成功")
+                except:
+                    print("❌ 无法修复JSON，抛出原始错误")
+                    raise
 
-    cleaned_response=convert_page_to_int(last_complete['table_of_contents'])
+    cleaned_response=convert_page_to_int(last_complete_parsed['table_of_contents'])
     return cleaned_response
     
 
@@ -676,7 +700,8 @@ def process_none_page_numbers(toc_items, page_list, start_index=1, model=None):
             item_copy = copy.deepcopy(item)
             del item_copy['page']
             result = add_page_number_to_toc(page_contents, item_copy, model)
-            if isinstance(result[0]['physical_index'], str) and result[0]['physical_index'].startswith('<physical_index'):
+            # 修复: 检查 result 是否为空，避免 IndexError
+            if result and len(result) > 0 and isinstance(result[0].get('physical_index'), str) and result[0]['physical_index'].startswith('<physical_index'):
                 item['physical_index'] = int(result[0]['physical_index'].split('_')[-1].rstrip('>').strip())
                 del item['page']
     

@@ -7,13 +7,15 @@ import json
 import asyncio
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, File, UploadFile, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from urllib.parse import quote
+from fastapi import APIRouter, File, UploadFile, BackgroundTasks, HTTPException
+from fastapi.responses import StreamingResponse, Response
 from loguru import logger
 
 from app.api.async_tasks import TaskManager
 from app.core.graph import create_tender_analysis_graph
-from app.core.states import TenderAnalysisState
+from app.core.states import TenderAnalysisState, PageIndexDocument
+from app.services.excel_export import ExcelExportService
 
 router = APIRouter()
 
@@ -213,7 +215,10 @@ async def get_progress(task_id: str):
                 serializable_task = {
                     **task,
                     "created_at": task["created_at"].isoformat() if isinstance(task.get("created_at"), datetime) else task.get("created_at"),
-                    "updated_at": task["updated_at"].isoformat() if isinstance(task.get("updated_at"), datetime) else task.get("updated_at")
+                    "updated_at": task["updated_at"].isoformat() if isinstance(task.get("updated_at"), datetime) else task.get("updated_at"),
+                    "start_time": task["start_time"].isoformat() if task.get("start_time") and isinstance(task.get("start_time"), datetime) else None,
+                    "elapsed_seconds": task.get("elapsed_seconds", 0),
+                    "logs": task.get("logs", [])
                 }
                 yield f"data: {json.dumps(serializable_task, ensure_ascii=False)}\n\n"
                 last_progress = current_progress
@@ -286,4 +291,59 @@ async def get_task_info(task_id: str):
             db.close()
     
     return task
+
+
+@router.get("/download/excel/{task_id}")
+async def download_excel(task_id: str):
+    """
+    下载Excel格式的需求矩阵
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        Excel文件下载
+    """
+    # 获取任务信息
+    task = TaskManager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+    
+    # 获取document_tree
+    document_tree = None
+    if task.get("result") and isinstance(task["result"], dict):
+        document_tree = task["result"].get("document_tree")
+    
+    if not document_tree:
+        raise HTTPException(status_code=404, detail="未找到文档结构数据")
+    
+    try:
+        # 转换为PageIndexDocument对象
+        doc = PageIndexDocument(**document_tree)
+        
+        # 生成Excel
+        excel_bytes = ExcelExportService.export_to_excel(doc)
+        
+        # 生成文件名
+        file_name = ExcelExportService.get_filename(doc.doc_name)
+        
+        # URL编码文件名（支持中文）
+        # 使用 RFC 2231 标准格式
+        encoded_filename = quote(file_name.encode('utf-8'))
+        
+        # 返回文件
+        return Response(
+            content=excel_bytes.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                # 同时提供ASCII后备和UTF-8编码的文件名，确保最大兼容性
+                "Content-Disposition": f"attachment; filename=\"requirement_matrix.xlsx\"; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+    except Exception as e:
+        logger.error(f"生成Excel失败: {e}")
+        raise HTTPException(status_code=500, detail=f"生成Excel失败: {str(e)}")
 
