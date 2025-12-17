@@ -61,7 +61,7 @@ class PageIndexService:
         max_pages_per_node: int = 10,
         max_tokens_per_node: int = 8000,
         add_node_id: bool = True,
-        add_node_summary: bool = True,
+        add_node_summary: bool = False,
         add_doc_description: bool = False,
         add_node_text: bool = False
     ):

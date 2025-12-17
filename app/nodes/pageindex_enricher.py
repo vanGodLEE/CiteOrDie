@@ -115,40 +115,17 @@ def _prepare_node_content(node: PageIndexNode) -> str:
     """
     准备节点内容用于需求提取
     
-    优先级（重构后）：
-    1. original_text字段（精确提取的原文，用于需求提取）
-    2. text字段（如果配置了add_node_text）
-    3. summary字段（降级方案）
-    4. 子节点的summary拼接
+    策略（重构后）：
+    只使用original_text字段（text_filler填充的精确原文）
+    不再降级使用summary、text等字段
     """
-    # 方式1：使用original_text字段（最优）
-    if node.original_text and len(node.original_text) > 50:
+    # 只使用original_text字段
+    if node.original_text and len(node.original_text.strip()) > 0:
         logger.debug(f"使用original_text，长度: {len(node.original_text)}")
         return node.original_text
     
-    # 方式2：使用text字段（降级）
-    if node.text and len(node.text) > 100:
-        logger.warning(f"original_text为空，降级使用text字段")
-        return node.text
-    
-    # 方式3：使用summary（降级）
-    if node.summary and len(node.summary) > 50:
-        logger.warning(f"original_text和text为空，降级使用summary字段")
-        return node.summary
-    
-    # 方式4：拼接子节点的summary（降级）
-    if node.nodes:
-        logger.warning(f"original_text、text、summary均为空，尝试拼接子节点summary")
-        child_summaries = []
-        for child in node.nodes:
-            if child.summary:
-                child_summaries.append(f"## {child.title}\n{child.summary}")
-        
-        if child_summaries:
-            return "\n\n".join(child_summaries)
-    
-    # 兜底：返回空字符串（跳过该节点）
-    logger.warning(f"节点 {node.title} 无可用内容，跳过")
+    # original_text为空，表示该节点无正文内容
+    logger.info(f"节点 {node.title} 的original_text为空，跳过需求提取")
     return ""
 
 

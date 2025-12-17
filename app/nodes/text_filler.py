@@ -185,19 +185,35 @@ def fill_text_recursively(
                 if original_text:
                     logger.info(f"   ✅ LLM提取原文成功: 长度 {len(original_text)}")
                 else:
+                    original_text = ""
                     logger.warning(f"   ⚠️ LLM返回空原文")
                 
                 # 填充到节点（即使为空也填充，保持一致性）
                 node.original_text = original_text if original_text else ""
                 
-                # 生成基于original_text的summary（只要有原文就生成，不限制长度）
+                # 记录填充状态
+                if original_text:
+                    logger.info(f"   ✅ 原文填充成功: 长度={len(original_text)}")
+                else:
+                    logger.info(
+                        f"   ℹ️  节点无正文内容: original_text已设为空字符串\n"
+                        f"   节点: {node.title} (ID: {node.node_id})\n"
+                        f"   这通常表示该节点只是章节标题，内容在子节点中"
+                    )
+                
+                # 生成基于original_text的summary
                 if original_text and len(original_text.strip()) > 0:
+                    # 有原文，生成summary
                     summary = generate_summary_from_text(
                         node_title=node.title,
                         original_text=original_text
                     )
                     node.summary = summary
                     logger.debug(f"   📝 Summary已生成，长度: {len(summary)}")
+                else:
+                    # 无原文，summary设为空字符串（保持字段完整性）
+                    node.summary = ""
+                    logger.debug(f"   📝 Summary设为空字符串（original_text为空）")
                 
                 filled_count += 1
                 
@@ -205,12 +221,14 @@ def fill_text_recursively(
             else:
                 logger.warning(f"节点 '{node.title}' 的页面文本为空或过短，跳过填充")
                 node.original_text = ""
+                node.summary = ""
         else:
             logger.warning(
                 f"节点 '{node.title}' 的页面范围无效: "
                 f"[{start_page}, {end_page}]"
             )
             node.original_text = ""
+            node.summary = ""
         
         # 3. 递归处理子节点
         if node.nodes:
@@ -228,7 +246,9 @@ def fill_text_recursively(
     except Exception as e:
         logger.error(f"填充节点 '{node.title}' 的原文时出错: {e}")
         logger.exception(e)
+        # 出错时确保字段完整性
         node.original_text = ""
+        node.summary = ""
         return filled_count
 
 
@@ -330,11 +350,20 @@ def extract_original_text_with_llm(
             original_text = original_text.strip()
             # 识别特殊返回值标记
             if original_text in ["无内容", "未找到", "无", "TITLE_NOT_FOUND", "NO_CONTENT"]:
-                logger.info(f"LLM返回特殊标记: {original_text}，转换为空字符串")
+                logger.warning(
+                    f"⚠️ LLM返回特殊标记: '{original_text}' (节点: {node_title})\n"
+                    f"   这可能表示:\n"
+                    f"   1. PDF文本中找不到该标题\n"
+                    f"   2. 标题后没有内容\n"
+                    f"   请检查PDF文本和标题匹配情况"
+                )
                 return ""
+            
+            # 记录成功提取
+            logger.debug(f"✅ LLM成功提取原文: 长度={len(original_text)}, 节点={node_title}")
             return original_text
         else:
-            logger.warning(f"LLM未返回有效响应")
+            logger.error(f"❌ LLM返回空响应 (节点: {node_title})")
             return ""
         
     except Exception as e:
