@@ -13,120 +13,107 @@ from app.api.async_tasks import TaskManager
 from app.core.config import settings
 
 
-def text_filler_node(state: TenderAnalysisState) -> Dict[str, Any]:
+def text_filler_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Text Filler节点 - 为PageIndex结构树填充精确原文
+    Text Filler节点 - 为单个节点填充精确原文（并行版本）
     
     输入：
-    - state.pageindex_document: PageIndex生成的结构树
-    - state.pdf_path: PDF文件路径
+    - state["node"]: 单个PageIndexNode
+    - state["pdf_path"]: PDF文件路径
+    - state["pageindex_document"]: 完整文档（用于查找兄弟节点）
     
     输出：
-    - state.pageindex_document: 每个节点都包含original_text字段
+    - 更新node的original_text和summary字段
     
     工作流程：
-    1. 递归遍历整个结构树
-    2. 对每个节点，根据其类型（有子/无子）计算应参照的页面范围
-    3. 从PDF中提取这些页面的文本
-    4. 调用LLM精确提取该节点标题下的内容
-    5. 填充到节点的original_text字段
+    1. 计算节点的页面范围（需要兄弟节点信息）
+    2. 从PDF中提取这些页面的文本
+    3. 调用LLM精确提取该节点标题下的内容
+    4. 填充到节点的original_text字段
     """
-    logger.info("=" * 60)
-    logger.info("Text Filler节点开始执行")
-    logger.info("=" * 60)
-    
-    pdf_path = state["pdf_path"]
+    node = state.get("node")
+    pdf_path = state.get("pdf_path")
     pageindex_doc = state.get("pageindex_document")
     task_id = state.get("task_id")
     
-    if not pageindex_doc:
-        logger.error("未找到pageindex_document，无法填充原文")
-        return {"error_message": "未找到pageindex_document"}
+    if not node:
+        logger.error("未找到node，无法填充原文")
+        return {}
     
     if not pdf_path:
         logger.error("未找到pdf_path，无法提取PDF文本")
-        return {"error_message": "未找到pdf_path"}
-    
-    # 更新任务进度
-    if task_id:
-        TaskManager.log_progress(
-            task_id,
-            "正在填充精确原文...",
-            35
-        )
+        return {}
     
     try:
-        # 递归填充所有节点的原文
-        total_nodes = 0
-        for root_node in pageindex_doc.structure:
-            total_nodes += len(root_node.get_all_nodes())
+        # 找到该节点的兄弟节点列表
+        siblings = find_siblings(node, pageindex_doc)
         
-        logger.info(f"开始为 {total_nodes} 个节点填充原文")
+        # 填充单个节点的原文（直接修改节点对象，无需返回）
+        fill_single_node_text(
+            node=node,
+            pdf_path=pdf_path,
+            siblings=siblings,
+            task_id=task_id
+        )
         
-        filled_count = 0
-        for i, root_node in enumerate(pageindex_doc.structure):
-            logger.info(f"处理根节点 {i+1}/{len(pageindex_doc.structure)}: {root_node.title}")
-            filled_count += fill_text_recursively(
-                node=root_node,
-                pdf_path=pdf_path,
-                parent=None,
-                siblings=pageindex_doc.structure,
-                task_id=task_id
-            )
-        
-        logger.info(f"✓ 原文填充完成，共填充 {filled_count} 个节点")
-        
-        # 更新任务进度
-        if task_id:
-            TaskManager.log_progress(
-                task_id,
-                f"✓ 原文填充完成，共填充 {filled_count} 个节点",
-                45
-            )
-        
-        return {
-            "pageindex_document": pageindex_doc
-        }
+        # 不返回任何东西！节点已通过引用传递被修改
+        return {}
         
     except Exception as e:
-        error_msg = f"原文填充失败: {str(e)}"
-        logger.error(error_msg)
+        logger.error(f"填充节点 '{node.title}' 的原文时出错: {e}")
         logger.exception(e)
-        
-        if task_id:
-            TaskManager.log_progress(
-                task_id,
-                f"✗ {error_msg}",
-                0
-            )
-        
-        return {
-            "error_message": error_msg
-        }
+        # 出错时确保字段完整性
+        node.original_text = ""
+        node.summary = ""
+        return {}
 
 
-def fill_text_recursively(
+def find_siblings(node: PageIndexNode, pageindex_doc: PageIndexDocument) -> List[PageIndexNode]:
+    """
+    在文档树中找到节点的兄弟节点列表
+    
+    Args:
+        node: 目标节点
+        pageindex_doc: 完整文档
+        
+    Returns:
+        包含该节点的兄弟节点列表（包括节点自己）
+    """
+    def find_in_tree(current_list: List[PageIndexNode]) -> Optional[List[PageIndexNode]]:
+        """递归查找节点所在的兄弟列表"""
+        for n in current_list:
+            if n is node:
+                return current_list
+            if n.nodes:
+                result = find_in_tree(n.nodes)
+                if result is not None:
+                    return result
+        return None
+    
+    # 从根节点开始查找
+    siblings = find_in_tree(pageindex_doc.structure)
+    if siblings is None:
+        # 如果找不到，可能是根节点
+        siblings = pageindex_doc.structure
+    
+    return siblings
+
+
+def fill_single_node_text(
     node: PageIndexNode,
     pdf_path: str,
-    parent: Optional[PageIndexNode] = None,
-    siblings: Optional[List[PageIndexNode]] = None,
+    siblings: List[PageIndexNode],
     task_id: Optional[str] = None
-) -> int:
+):
     """
-    递归填充节点的原文
+    填充单个节点的原文（不递归）
     
     Args:
         node: 当前节点
         pdf_path: PDF文件路径
-        parent: 父节点
         siblings: 兄弟节点列表（包含自己）
         task_id: 任务ID
-        
-    Returns:
-        填充的节点数量
     """
-    filled_count = 0
-    
     try:
         # 1. 计算当前节点的页面范围
         start_page, end_page = calculate_text_fill_range(node, siblings)
@@ -143,7 +130,7 @@ def fill_text_recursively(
             else:
                 boundary_info = "边界=节点结束页"
         
-        logger.info(
+        logger.debug(
             f"📄 节点 '{node.title}' (ID: {node.node_id})\n"
             f"   类型: {node_type}\n"
             f"   页面范围: [{start_page}, {end_page}]\n"
@@ -154,10 +141,10 @@ def fill_text_recursively(
         if start_page <= end_page and end_page > 0:
             # 提取PDF文本
             page_text = extract_pages_text(
-                pdf_path, 
-                start_page, 
+                pdf_path,
+                start_page,
                 end_page,
-                add_page_markers=True  # 添加页码标记
+                add_page_markers=True
             )
             
             logger.debug(f"   📥 PDF文本提取成功: 页面 [{start_page}, {end_page}]，文本长度: {len(page_text)}")
@@ -166,15 +153,13 @@ def fill_text_recursively(
                 # 确定结束边界标题
                 end_boundary_title = None
                 if node.nodes:
-                    # 有子节点，结束边界是第一个子节点的标题
                     end_boundary_title = node.nodes[0].title
                 else:
-                    # 叶子节点，结束边界是下一个兄弟节点的标题
                     next_sibling = node.find_next_sibling(siblings) if siblings else None
                     if next_sibling:
                         end_boundary_title = next_sibling.title
                 
-                # 调用LLM提取精确原文，提供边界信息
+                # 调用LLM提取精确原文
                 original_text = extract_original_text_with_llm(
                     node_title=node.title,
                     page_text=page_text,
@@ -183,19 +168,18 @@ def fill_text_recursively(
                 
                 # 记录LLM返回结果
                 if original_text:
-                    logger.info(f"   ✅ LLM提取原文成功: 长度 {len(original_text)}")
+                    logger.debug(f"   ✅ LLM提取原文成功: 长度 {len(original_text)}")
                 else:
-                    original_text = ""
-                    logger.warning(f"   ⚠️ LLM返回空原文")
+                    logger.debug(f"   ⚠️ LLM返回空原文")
                 
-                # 填充到节点（即使为空也填充，保持一致性）
+                # 填充到节点
                 node.original_text = original_text if original_text else ""
                 
                 # 记录填充状态
                 if original_text:
-                    logger.info(f"   ✅ 原文填充成功: 长度={len(original_text)}")
+                    logger.debug(f"   ✅ 原文填充成功: 长度={len(original_text)}")
                 else:
-                    logger.info(
+                    logger.debug(
                         f"   ℹ️  节点无正文内容: original_text已设为空字符串\n"
                         f"   节点: {node.title} (ID: {node.node_id})\n"
                         f"   这通常表示该节点只是章节标题，内容在子节点中"
@@ -203,7 +187,6 @@ def fill_text_recursively(
                 
                 # 生成基于original_text的summary
                 if original_text and len(original_text.strip()) > 0:
-                    # 有原文，生成summary
                     summary = generate_summary_from_text(
                         node_title=node.title,
                         original_text=original_text
@@ -211,13 +194,10 @@ def fill_text_recursively(
                     node.summary = summary
                     logger.debug(f"   📝 Summary已生成，长度: {len(summary)}")
                 else:
-                    # 无原文，summary设为空字符串（保持字段完整性）
                     node.summary = ""
                     logger.debug(f"   📝 Summary设为空字符串（original_text为空）")
                 
-                filled_count += 1
-                
-                logger.info(f"   ✅ 原文填充完成\n")
+                logger.debug(f"   ✅ 原文填充完成\n")
             else:
                 logger.warning(f"节点 '{node.title}' 的页面文本为空或过短，跳过填充")
                 node.original_text = ""
@@ -230,26 +210,11 @@ def fill_text_recursively(
             node.original_text = ""
             node.summary = ""
         
-        # 3. 递归处理子节点
-        if node.nodes:
-            for child in node.nodes:
-                filled_count += fill_text_recursively(
-                    node=child,
-                    pdf_path=pdf_path,
-                    parent=node,
-                    siblings=node.nodes,
-                    task_id=task_id
-                )
-        
-        return filled_count
-        
     except Exception as e:
         logger.error(f"填充节点 '{node.title}' 的原文时出错: {e}")
         logger.exception(e)
-        # 出错时确保字段完整性
         node.original_text = ""
         node.summary = ""
-        return filled_count
 
 
 def calculate_text_fill_range(

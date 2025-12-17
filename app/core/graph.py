@@ -22,30 +22,43 @@ def create_tender_analysis_graph():
     """
     创建招标分析工作流图
     
-    工作流拓扑（重构后）：
-    START → pageindex_parser → text_filler → [enricher_1, enricher_2, ...] → auditor → END
+    工作流拓扑（并行优化版）：
+    START → pageindex_parser → [text_fillers并行] → text_filler_aggregator → [enrichers并行] → auditor → END
     
     关键点：
     1. pageindex_parser: 调用PageIndex解析PDF，生成文档树结构
-    2. text_filler: 递归遍历树，为每个节点填充精确原文（行级别）
-    3. enrichers (并行): 基于精确原文为每个叶子节点提取需求
-    4. auditor: 汇总所有需求，生成最终矩阵（无需复杂去重）
+    2. text_fillers (并行): 为每个节点并行填充精确原文
+    3. text_filler_aggregator: 汇聚所有text_filler结果，准备enrichers
+    4. enrichers (并行): 为每个叶子节点并行提取需求
+    5. auditor: 汇总所有需求，生成最终矩阵
+    
+    性能优化：
+    - text_fillers并行执行，大幅提升原文填充速度
+    - enrichers并行执行，充分利用LLM并发能力
+    
+    注意：text_filler_aggregator是关键汇聚节点，确保所有text_filler完成后才开始enrichers
     """
     # 创建状态图
     workflow = StateGraph(TenderAnalysisState)
     
     # 添加节点
     workflow.add_node("pageindex_parser", pageindex_parser_node)
-    workflow.add_node("text_filler", text_filler_node)
+    workflow.add_node("text_filler", text_filler_node)  # 单个节点的填充
+    workflow.add_node("text_filler_aggregator", text_filler_aggregator_node)  # 汇聚节点
     workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
     
     # 连接边
     workflow.add_edge(START, "pageindex_parser")
-    workflow.add_edge("pageindex_parser", "text_filler")
     
-    # 动态Map：为每个叶子节点创建一个Send到enricher
-    workflow.add_conditional_edges("text_filler", route_to_enrichers)
+    # 动态Map1：为每个节点创建一个Send到text_filler（并行填充原文）
+    workflow.add_conditional_edges("pageindex_parser", route_to_text_fillers)
+    
+    # 所有text_filler完成后，汇聚到aggregator
+    workflow.add_edge("text_filler", "text_filler_aggregator")
+    
+    # 动态Map2：从aggregator路由到enrichers（并行提取需求）
+    workflow.add_conditional_edges("text_filler_aggregator", route_to_enrichers)
     
     # 所有enricher完成后，汇总到auditor
     workflow.add_edge("enricher", "auditor")
@@ -53,16 +66,92 @@ def create_tender_analysis_graph():
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（重构后：PageIndex + TextFiller架构）")
+    logger.info("招标分析工作流图构建完成（并行优化版 + 汇聚节点）")
     
     return graph
 
 
+def route_to_text_fillers(state: TenderAnalysisState) -> List[Send]:
+    """
+    动态路由：为每个节点创建一个Send到text_filler（并行填充原文）
+    
+    策略：处理所有节点（包括父节点和叶子节点）
+    """
+    pageindex_doc = state.get("pageindex_document")
+    pdf_path = state.get("pdf_path")
+    task_id = state.get("task_id")
+    
+    if not pageindex_doc:
+        logger.warning("未找到pageindex_document，无法路由到text_fillers")
+        return []
+    
+    # 获取所有节点（父节点+叶子节点）
+    all_nodes = []
+    for root in pageindex_doc.structure:
+        all_nodes.extend(root.get_all_nodes())
+    
+    if not all_nodes:
+        logger.warning("未找到任何节点，无法路由到text_fillers")
+        return []
+    
+    logger.info(f"准备并行填充 {len(all_nodes)} 个节点的原文")
+    
+    # 为每个节点创建一个Send
+    sends = []
+    for node in all_nodes:
+        # 创建TextFiller任务状态
+        filler_state = {
+            "node": node,
+            "pdf_path": pdf_path,
+            "task_id": task_id,
+            "pageindex_document": pageindex_doc  # 传递完整文档用于计算兄弟节点
+        }
+        
+        sends.append(Send("text_filler", filler_state))
+    
+    logger.info(f"✓ 路由完成，将并行执行 {len(sends)} 个text_filler任务")
+    
+    return sends
+
+
+def text_filler_aggregator_node(state: TenderAnalysisState) -> Dict[str, Any]:
+    """
+    Text Filler汇聚节点 - 等待所有text_filler完成
+    
+    这是一个关键的汇聚节点，确保：
+    1. 所有text_filler并行任务都已完成
+    2. 所有节点的original_text和summary都已填充
+    3. 准备好进入enricher阶段
+    
+    返回：
+    - pageindex_document: 更新后的完整文档（所有节点都已填充原文）
+    """
+    pageindex_doc = state.get("pageindex_document")
+    
+    if pageindex_doc:
+        # 统计填充情况
+        all_nodes = []
+        for root in pageindex_doc.structure:
+            all_nodes.extend(root.get_all_nodes())
+        
+        filled_count = sum(1 for node in all_nodes if node.original_text)
+        total_count = len(all_nodes)
+        
+        logger.info(f"✓ Text Filler阶段完成")
+        logger.info(f"  - 总节点数: {total_count}")
+        logger.info(f"  - 已填充原文: {filled_count}")
+        logger.info(f"  - 填充率: {filled_count/total_count*100:.1f}%")
+    
+    return {
+        "pageindex_document": pageindex_doc
+    }
+
+
 def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
     """
-    动态路由：为每个需要处理的节点创建一个Send对象
+    从text_filler_aggregator路由到enrichers
     
-    策略：处理所有叶子节点（最细粒度）
+    注意：此函数在所有text_filler完成并汇聚后执行一次
     """
     pageindex_doc = state.get("pageindex_document")
     task_id = state.get("task_id")
@@ -78,15 +167,13 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
         logger.warning("未找到叶子节点，无法路由到enrichers")
         return []
     
-    logger.info(f"准备并行处理 {len(leaf_nodes)} 个叶子节点")
+    logger.info(f"准备并行提取 {len(leaf_nodes)} 个叶子节点的需求")
     
     # 为每个叶子节点创建一个Send
     sends = []
     for node in leaf_nodes:
-        # 构建节点路径
         node.path = f"{node.node_id or 'UNKNOWN'}: {node.title}"
         
-        # 创建SectionState
         section_state = SectionState(
             pageindex_node=node,
             task_id=task_id,
@@ -98,10 +185,7 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
             requirements=[]
         )
         
-        # 创建Send对象
         sends.append(Send("enricher", section_state))
-        
-        logger.debug(f"  - 路由节点: {node.path} (页码: {node.start_index}-{node.end_index})")
     
     logger.info(f"✓ 路由完成，将并行执行 {len(sends)} 个enricher任务")
     
