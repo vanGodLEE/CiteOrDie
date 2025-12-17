@@ -59,11 +59,14 @@ class PageIndexNode(BaseModel):
     title: str = Field(..., description="章节标题")
     start_index: int = Field(..., description="起始页码（1-based）")
     end_index: int = Field(..., description="结束页码（1-based）")
-    summary: Optional[str] = Field(None, description="PageIndex生成的节点摘要")
+    summary: Optional[str] = Field(None, description="PageIndex生成的节点摘要（页级别，仅供参考）")
     text: Optional[str] = Field(None, description="PageIndex生成的节点全文（可选）")
     
     # 树形结构
     nodes: List[PageIndexNode] = Field(default_factory=list, description="子节点列表")
+    
+    # **新增：精确原文字段**
+    original_text: Optional[str] = Field(None, description="精确提取的原文内容（行级别，用于需求提取）")
     
     # **关键扩展：需求字段**
     requirements: List[RequirementItem] = Field(default_factory=list, description="该节点的需求列表")
@@ -91,6 +94,23 @@ class PageIndexNode(BaseModel):
         for child in self.nodes:
             leaves.extend(child.get_leaf_nodes())
         return leaves
+    
+    def get_all_nodes(self) -> List[PageIndexNode]:
+        """递归获取所有节点（包括自己和所有子孙节点）"""
+        all_nodes = [self]
+        for child in self.nodes:
+            all_nodes.extend(child.get_all_nodes())
+        return all_nodes
+    
+    def find_next_sibling(self, siblings: List['PageIndexNode']) -> Optional['PageIndexNode']:
+        """在兄弟节点列表中找到下一个兄弟节点"""
+        try:
+            current_idx = siblings.index(self)
+            if current_idx < len(siblings) - 1:
+                return siblings[current_idx + 1]
+        except ValueError:
+            pass
+        return None
     
     def count_total_requirements(self) -> int:
         """统计该节点及所有子节点的总需求数"""

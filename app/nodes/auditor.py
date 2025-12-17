@@ -15,12 +15,13 @@ from app.core.config import settings
 
 def auditor_node(state: TenderAnalysisState) -> dict:
     """
-    Auditor节点 - 去重和汇总
+    Auditor节点 - 汇总和格式化（重构后：无需复杂去重）
     
-    业务逻辑：
+    业务逻辑（重构后）：
     1. 汇总所有Worker提取的需求
-    2. 去重：使用文本相似度检测重复需求
+    2. 可选的简单去重（基于original_text完全一致）
     3. 按章节排序
+    4. 格式统一
     
     Args:
         state: 全局状态
@@ -28,13 +29,13 @@ def auditor_node(state: TenderAnalysisState) -> dict:
     Returns:
         包含最终需求矩阵的字典
     """
-    logger.info("====== Auditor节点开始执行 ======")
+    logger.info("====== Auditor节点开始执行（重构后） ======")
     
-    # 更新进度：开始质检去重
+    # 更新进度：开始质检
     task_id = state.get("task_id")
     if task_id:
         from app.api.async_tasks import TaskManager
-        TaskManager.update_task(task_id, progress=85, message="正在进行质量检查和去重...")
+        TaskManager.update_task(task_id, progress=85, message="正在进行质量检查和汇总...")
     
     requirements = state.get("requirements", [])
     
@@ -44,9 +45,10 @@ def auditor_node(state: TenderAnalysisState) -> dict:
     
     logger.info(f"开始处理 {len(requirements)} 条原始需求")
     
-    # 步骤1: 去重
-    deduplicated = _deduplicate_requirements(requirements)
-    logger.info(f"去重后剩余 {len(deduplicated)} 条需求")
+    # 步骤1: 简单去重（可选，仅去除完全相同的需求）
+    deduplicated = _simple_deduplicate_requirements(requirements)
+    if len(deduplicated) < len(requirements):
+        logger.info(f"简单去重后剩余 {len(deduplicated)} 条需求（去除了 {len(requirements) - len(deduplicated)} 条完全重复）")
     
     # 步骤2: 按章节排序
     sorted_reqs = _sort_requirements(deduplicated)
@@ -60,52 +62,41 @@ def auditor_node(state: TenderAnalysisState) -> dict:
     return {"final_matrix": final_matrix}
 
 
-def _deduplicate_requirements(requirements: List[RequirementItem]) -> List[RequirementItem]:
+def _simple_deduplicate_requirements(requirements: List[RequirementItem]) -> List[RequirementItem]:
     """
-    去重：使用TF-IDF + Cosine Similarity检测相似需求
+    简单去重：仅去除original_text完全相同的需求
     
-    如果两个需求的相似度超过阈值，保留第一个
+    重构后说明：
+    - 由于使用了精确原文填充，理论上不应该有重复需求
+    - 此函数仅作为保险措施，去除万一出现的完全重复项
+    - 不再使用复杂的TF-IDF相似度计算
     """
     if len(requirements) <= 1:
         return requirements
     
     try:
-        # 提取文本用于相似度计算（使用requirement + original_text的组合）
-        texts = [f"{req.requirement} {req.original_text}" for req in requirements]
+        seen_texts = set()
+        deduplicated = []
+        removed_count = 0
         
-        # 计算TF-IDF向量
-        vectorizer = TfidfVectorizer()
-        tfidf_matrix = vectorizer.fit_transform(texts)
-        
-        # 计算余弦相似度
-        similarity_matrix = cosine_similarity(tfidf_matrix)
-        
-        # 标记要保留的需求
-        to_keep = [True] * len(requirements)
-        similarity_threshold = settings.similarity_threshold
-        
-        for i in range(len(requirements)):
-            if not to_keep[i]:
-                continue
+        for req in requirements:
+            # 使用original_text作为去重依据
+            text_key = req.original_text.strip()
             
-            for j in range(i + 1, len(requirements)):
-                if not to_keep[j]:
-                    continue
-                
-                # 如果相似度超过阈值，保留第一个
-                if similarity_matrix[i, j] >= similarity_threshold:
-                        to_keep[j] = False
-                        logger.debug(f"去重：移除相似需求 {requirements[j].matrix_id}")
+            if text_key not in seen_texts:
+                seen_texts.add(text_key)
+                deduplicated.append(req)
+            else:
+                removed_count += 1
+                logger.debug(f"去重：移除完全重复需求 {req.matrix_id}")
         
-        deduplicated = [req for i, req in enumerate(requirements) if to_keep[i]]
-        removed_count = len(requirements) - len(deduplicated)
         if removed_count > 0:
-            logger.info(f"去重移除了 {removed_count} 条相似需求")
+            logger.info(f"简单去重移除了 {removed_count} 条完全重复的需求")
         
         return deduplicated
         
     except Exception as e:
-        logger.warning(f"去重过程出错，返回原始列表: {e}")
+        logger.warning(f"简单去重过程出错，返回原始列表: {e}")
         return requirements
 
 

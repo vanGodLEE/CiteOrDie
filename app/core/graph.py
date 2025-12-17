@@ -13,6 +13,7 @@ from langgraph.types import Send
 
 from app.core.states import TenderAnalysisState, SectionState, PageIndexNode
 from app.nodes.pageindex_parser import pageindex_parser_node
+from app.nodes.text_filler import text_filler_node
 from app.nodes.pageindex_enricher import pageindex_enricher_node
 from app.nodes.auditor import auditor_node
 
@@ -21,27 +22,30 @@ def create_tender_analysis_graph():
     """
     创建招标分析工作流图
     
-    工作流拓扑：
-    START → pageindex_parser → [enricher_1, enricher_2, ...] → auditor → END
+    工作流拓扑（重构后）：
+    START → pageindex_parser → text_filler → [enricher_1, enricher_2, ...] → auditor → END
     
     关键点：
-    1. pageindex_parser: 调用PageIndex解析PDF，生成文档树
-    2. enrichers (并行): 为每个叶子节点提取需求
-    3. auditor: 汇总所有需求，生成最终矩阵
+    1. pageindex_parser: 调用PageIndex解析PDF，生成文档树结构
+    2. text_filler: 递归遍历树，为每个节点填充精确原文（行级别）
+    3. enrichers (并行): 基于精确原文为每个叶子节点提取需求
+    4. auditor: 汇总所有需求，生成最终矩阵（无需复杂去重）
     """
     # 创建状态图
     workflow = StateGraph(TenderAnalysisState)
     
     # 添加节点
     workflow.add_node("pageindex_parser", pageindex_parser_node)
+    workflow.add_node("text_filler", text_filler_node)
     workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
     
     # 连接边
     workflow.add_edge(START, "pageindex_parser")
+    workflow.add_edge("pageindex_parser", "text_filler")
     
     # 动态Map：为每个叶子节点创建一个Send到enricher
-    workflow.add_conditional_edges("pageindex_parser", route_to_enrichers)
+    workflow.add_conditional_edges("text_filler", route_to_enrichers)
     
     # 所有enricher完成后，汇总到auditor
     workflow.add_edge("enricher", "auditor")
@@ -49,7 +53,7 @@ def create_tender_analysis_graph():
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（PageIndex架构）")
+    logger.info("招标分析工作流图构建完成（重构后：PageIndex + TextFiller架构）")
     
     return graph
 
@@ -167,4 +171,3 @@ def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
             "matrix": [],
             "processing_time": 0
         }
-

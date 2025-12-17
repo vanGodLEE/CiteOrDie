@@ -287,9 +287,8 @@ def get_pageindex_service() -> PageIndexService:
             max_pages_per_node=10,
             max_tokens_per_node=20000,
             add_node_id=True,
-            add_node_summary=True,
+            add_node_summary=False,  # 禁用PageIndex的summary，改为从original_text生成
             add_doc_description=False,
             add_node_text=False  # 默认不添加，需要时再启用
         )
     return _pageindex_service
-

@@ -49,9 +49,12 @@ def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:
         # 准备节点内容
         content = _prepare_node_content(node)
         
-        if not content or len(content) < 50:
-            logger.warning(f"节点 {node.title} 内容过短，跳过")
+        # 只要有内容就尝试提取需求，让LLM判断是否包含需求
+        if not content or len(content.strip()) == 0:
+            logger.info(f"节点 {node.title} 无内容，跳过")
             return {"requirements": []}
+        
+        logger.info(f"节点 {node.title} 内容长度: {len(content)}字，开始提取需求")
         
         # 调用LLM提取需求
         llm_service = get_llm_service()
@@ -112,21 +115,30 @@ def _prepare_node_content(node: PageIndexNode) -> str:
     """
     准备节点内容用于需求提取
     
-    优先级：
-    1. text字段（如果配置了add_node_text）
-    2. summary字段
-    3. 子节点的summary拼接
+    优先级（重构后）：
+    1. original_text字段（精确提取的原文，用于需求提取）
+    2. text字段（如果配置了add_node_text）
+    3. summary字段（降级方案）
+    4. 子节点的summary拼接
     """
-    # 方式1：使用text字段
+    # 方式1：使用original_text字段（最优）
+    if node.original_text and len(node.original_text) > 50:
+        logger.debug(f"使用original_text，长度: {len(node.original_text)}")
+        return node.original_text
+    
+    # 方式2：使用text字段（降级）
     if node.text and len(node.text) > 100:
+        logger.warning(f"original_text为空，降级使用text字段")
         return node.text
     
-    # 方式2：使用summary
+    # 方式3：使用summary（降级）
     if node.summary and len(node.summary) > 50:
+        logger.warning(f"original_text和text为空，降级使用summary字段")
         return node.summary
     
-    # 方式3：拼接子节点的summary
+    # 方式4：拼接子节点的summary（降级）
     if node.nodes:
+        logger.warning(f"original_text、text、summary均为空，尝试拼接子节点summary")
         child_summaries = []
         for child in node.nodes:
             if child.summary:
@@ -135,25 +147,27 @@ def _prepare_node_content(node: PageIndexNode) -> str:
         if child_summaries:
             return "\n\n".join(child_summaries)
     
-    # 兜底：返回标题
-    return f"标题: {node.title}"
+    # 兜底：返回空字符串（跳过该节点）
+    logger.warning(f"节点 {node.title} 无可用内容，跳过")
+    return ""
 
 
 def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
     """
-    构建需求提取的提示词
+    构建需求提取的提示词（重构后：基于精确原文）
     """
-    prompt = f"""你是招标文件分析专家。请分析以下章节内容，提取所有招标需求。
+    prompt = f"""你是招标文件分析专家。请分析以下章节的**精确原文**，提取所有招标需求。
 
 ## 章节信息
 - 标题：{node.title}
 - 页码范围：{node.start_index}-{node.end_index}
 - 节点ID：{node.node_id or "UNKNOWN"}
 
-## 章节内容
+## 章节精确原文
 {content}
 
 ## 提取规则
+
 1. **需求范围**：提取所有招标需求，包括：
    - 功能需求：系统功能、业务流程
    - 技术需求：技术架构、开发语言、框架
@@ -170,11 +184,16 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 3. **提取要点**：
    - requirement：用简洁的语言概括需求（1-2句话）
-   - original_text：必须精确摘录原文，保持原样
+   - original_text：**必须从上述精确原文中摘录，保持原样**
    - page_number：需求所在的页码（使用start_index: {node.start_index}）
    - response_suggestion：建议的应答方向（1句话）
    - risk_warning：潜在风险提示（如果有，没有则填"无"）
    - notes：其他备注（如果有，没有则填"无"）
+
+4. **重要提醒**：
+   - 上述原文已经是精确提取的内容，仅包含"{node.title}"标题下的内容
+   - 不会包含其他标题的内容，因此**无需担心重复**
+   - 请充分提取该原文中的所有需求，一个都不要遗漏
 
 ## 输出格式
 严格按照RequirementItem模型输出JSON列表。
@@ -189,4 +208,3 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 - notes: "关键性能指标"
 """
     return prompt
-
