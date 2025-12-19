@@ -6,6 +6,9 @@ pageindex_parser → Map(Enrichers) → Auditor
 """
 
 import time
+import json
+import uuid
+from pathlib import Path
 from typing import List, Dict, Any
 from loguru import logger
 from langgraph.graph import StateGraph, START, END
@@ -22,21 +25,21 @@ def create_tender_analysis_graph():
     """
     创建招标分析工作流图
     
-    工作流拓扑（并行优化版）：
-    START → pageindex_parser → [text_fillers并行] → text_filler_aggregator → [enrichers并行] → auditor → END
+    工作流拓扑（修复版）：
+    START → pageindex_parser → [text_fillers并行] → aggregator → [enrichers并行] → auditor → END
     
     关键点：
     1. pageindex_parser: 调用PageIndex解析PDF，生成文档树结构
     2. text_fillers (并行): 为每个节点并行填充精确原文
-    3. text_filler_aggregator: 汇聚所有text_filler结果，准备enrichers
-    4. enrichers (并行): 为每个叶子节点并行提取需求
+    3. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
+    4. enrichers (并行): 为每个叶子节点并行提取需求（基于标题+原文）
     5. auditor: 汇总所有需求，生成最终矩阵
     
     性能优化：
     - text_fillers并行执行，大幅提升原文填充速度
     - enrichers并行执行，充分利用LLM并发能力
     
-    注意：text_filler_aggregator是关键汇聚节点，确保所有text_filler完成后才开始enrichers
+    重要：aggregator是必须的汇聚节点，防止enrichers被重复触发！
     """
     # 创建状态图
     workflow = StateGraph(TenderAnalysisState)
@@ -44,7 +47,7 @@ def create_tender_analysis_graph():
     # 添加节点
     workflow.add_node("pageindex_parser", pageindex_parser_node)
     workflow.add_node("text_filler", text_filler_node)  # 单个节点的填充
-    workflow.add_node("text_filler_aggregator", text_filler_aggregator_node)  # 汇聚节点
+    workflow.add_node("aggregator", aggregator_node)  # 汇聚节点（必须！）
     workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
     
@@ -54,11 +57,11 @@ def create_tender_analysis_graph():
     # 动态Map1：为每个节点创建一个Send到text_filler（并行填充原文）
     workflow.add_conditional_edges("pageindex_parser", route_to_text_fillers)
     
-    # 所有text_filler完成后，汇聚到aggregator
-    workflow.add_edge("text_filler", "text_filler_aggregator")
+    # 所有text_filler完成后，汇聚到aggregator（避免重复）
+    workflow.add_edge("text_filler", "aggregator")
     
-    # 动态Map2：从aggregator路由到enrichers（并行提取需求）
-    workflow.add_conditional_edges("text_filler_aggregator", route_to_enrichers)
+    # 动态Map2：从aggregator路由到enrichers（只执行一次！）
+    workflow.add_conditional_edges("aggregator", route_to_enrichers)
     
     # 所有enricher完成后，汇总到auditor
     workflow.add_edge("enricher", "auditor")
@@ -66,7 +69,7 @@ def create_tender_analysis_graph():
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（并行优化版 + 汇聚节点）")
+    logger.info("招标分析工作流图构建完成（修复重复执行Bug）")
     
     return graph
 
@@ -114,22 +117,21 @@ def route_to_text_fillers(state: TenderAnalysisState) -> List[Send]:
     return sends
 
 
-def text_filler_aggregator_node(state: TenderAnalysisState) -> Dict[str, Any]:
+def aggregator_node(state: TenderAnalysisState) -> Dict[str, Any]:
     """
-    Text Filler汇聚节点 - 等待所有text_filler完成
+    汇聚节点 - 等待所有text_filler完成
     
-    这是一个关键的汇聚节点，确保：
-    1. 所有text_filler并行任务都已完成
-    2. 所有节点的original_text和summary都已填充
-    3. 准备好进入enricher阶段
+    重要：这个节点是必须的！
+    如果没有这个节点，route_to_enrichers会被每个text_filler触发，
+    导致enrichers被重复执行N次（N=节点数）！
     
-    返回：
-    - pageindex_document: 更新后的完整文档（所有节点都已填充原文）
+    返回：空字典（不修改状态，避免并发冲突）
     """
     pageindex_doc = state.get("pageindex_document")
+    pdf_path = state.get("pdf_path")
     
     if pageindex_doc:
-        # 统计填充情况
+        # 统计填充情况（仅用于日志）
         all_nodes = []
         for root in pageindex_doc.structure:
             all_nodes.extend(root.get_all_nodes())
@@ -141,17 +143,50 @@ def text_filler_aggregator_node(state: TenderAnalysisState) -> Dict[str, Any]:
         logger.info(f"  - 总节点数: {total_count}")
         logger.info(f"  - 已填充原文: {filled_count}")
         logger.info(f"  - 填充率: {filled_count/total_count*100:.1f}%")
+        
+        # 保存中间文件（填充了original_text的完整文档）
+        if pdf_path:
+            _save_middle_json(pageindex_doc, pdf_path)
     
-    return {
-        "pageindex_document": pageindex_doc
-    }
+    # 返回空字典，不修改状态
+    return {}
+
+
+def _save_middle_json(pageindex_doc, pdf_path: str):
+    """
+    保存填充了original_text的中间JSON文件
+    
+    Args:
+        pageindex_doc: PageIndexDocument对象
+        pdf_path: 原始PDF路径
+    """
+    try:
+        # 1. 创建middle_json目录
+        middle_dir = Path("middle_json")
+        middle_dir.mkdir(exist_ok=True)
+        
+        # 2. 生成文件名：源文件名_唯一ID.json
+        pdf_name = Path(pdf_path).stem
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"{pdf_name}_{unique_id}.json"
+        filepath = middle_dir / filename
+        
+        # 3. 转换为字典并保存
+        json_data = pageindex_doc.dict()
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"✓ 中间文件已保存: {filepath}")
+        
+    except Exception as e:
+        logger.error(f"保存中间文件失败: {str(e)}")
 
 
 def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
     """
-    从text_filler_aggregator路由到enrichers
+    从aggregator路由到enrichers
     
-    注意：此函数在所有text_filler完成并汇聚后执行一次
+    注意：此函数在aggregator之后执行，确保只执行一次
     """
     pageindex_doc = state.get("pageindex_document")
     task_id = state.get("task_id")

@@ -115,14 +115,15 @@ def _prepare_node_content(node: PageIndexNode) -> str:
     """
     准备节点内容用于需求提取
     
-    策略（重构后）：
-    只使用original_text字段（text_filler填充的精确原文）
-    不再降级使用summary、text等字段
+    策略（优化后）：
+    使用"标题 + 原文"的组合，让LLM在提取需求时能充分理解上下文
     """
     # 只使用original_text字段
     if node.original_text and len(node.original_text.strip()) > 0:
-        logger.debug(f"使用original_text，长度: {len(node.original_text)}")
-        return node.original_text
+        # 组合标题和原文
+        content = f"## {node.title}\n\n{node.original_text}"
+        logger.debug(f"使用标题+original_text，总长度: {len(content)}")
+        return content
     
     # original_text为空，表示该节点无正文内容
     logger.info(f"节点 {node.title} 的original_text为空，跳过需求提取")
@@ -131,17 +132,28 @@ def _prepare_node_content(node: PageIndexNode) -> str:
 
 def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
     """
-    构建需求提取的提示词（重构后：基于精确原文）
+    构建需求提取的提示词（智能版：处理标题中的需求）
     """
-    prompt = f"""你是招标文件分析专家。请分析以下章节的**精确原文**，提取所有招标需求。
+    prompt = f"""你是招标文件分析专家。请分析以下章节内容（包含标题和原文），提取所有招标需求。
 
 ## 章节信息
-- 标题：{node.title}
 - 页码范围：{node.start_index}-{node.end_index}
 - 节点ID：{node.node_id or "UNKNOWN"}
 
-## 章节精确原文
+## 章节内容（标题+原文）
 {content}
+
+## 提取策略（重要）
+
+**智能识别标题中的需求**：
+1. **长标题/详细标题**：如果标题本身包含具体需求（如"系统需支持1000并发用户"、"响应时间不超过2秒"），请从标题中提取需求
+2. **短标题/分类标题**：如果标题只是分类名称（如"性能要求"、"技术规范"），则从原文中提取需求
+3. **综合情况**：标题和原文都可能包含需求，请两者都仔细分析，避免遗漏
+
+**提取来源判断**：
+- 标题包含明确需求 → 从标题提取，original_text填写标题内容
+- 标题仅是分类 → 从原文提取，original_text填写原文内容
+- 标题和原文都有需求 → 分别提取，各自记录original_text
 
 ## 提取规则
 
@@ -161,27 +173,63 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 3. **提取要点**：
    - requirement：用简洁的语言概括需求（1-2句话）
-   - original_text：**必须从上述精确原文中摘录，保持原样**
+   - original_text：**从标题或原文中精确摘录**（根据需求来源）
    - page_number：需求所在的页码（使用start_index: {node.start_index}）
    - response_suggestion：建议的应答方向（1句话）
    - risk_warning：潜在风险提示（如果有，没有则填"无"）
    - notes：其他备注（如果有，没有则填"无"）
 
 4. **重要提醒**：
-   - 上述原文已经是精确提取的内容，仅包含"{node.title}"标题下的内容
-   - 不会包含其他标题的内容，因此**无需担心重复**
-   - 请充分提取该原文中的所有需求，一个都不要遗漏
+    - 上述内容已包含章节标题和精确原文
+    - 标题可能本身就是需求，也可能只是分类标签，请智能判断
+    - 原文是精确提取的内容，仅包含该标题下的内容
+    - 不会包含其他标题的内容，因此**无需担心重复**
+    - 请结合标题和原文，充分提取所有需求，一个都不要遗漏
 
 ## 输出格式
 严格按照RequirementItem模型输出JSON列表。
 
-## 示例
-如果内容中提到"系统应支持不少于1000个并发用户同时在线"，应提取为：
-- requirement: "系统需支持1000个并发用户"
-- original_text: "系统应支持不少于1000个并发用户同时在线"
+## 示例说明
+
+**示例1：长标题包含具体需求**
+```
+## 系统需支持1000个并发用户，响应时间不超过2秒
+
+（原文为空或仅有补充说明）
+```
+应提取为：
+- requirement: "系统需支持1000个并发用户，响应时间不超过2秒"
+- original_text: "系统需支持1000个并发用户，响应时间不超过2秒"（从标题提取）
+- page_number: {node.start_index}
+- response_suggestion: "在技术方案中说明系统架构设计和性能优化方案"
+- risk_warning: "需要进行压力测试验证性能指标"
+- notes: "关键性能指标，来自标题"
+
+**示例2：短标题，需求在原文中**
+```
+## 性能要求
+
+系统应支持不少于1000个并发用户同时在线，响应时间不超过2秒。
+```
+应提取为：
+- requirement: "系统需支持1000个并发用户，响应时间不超过2秒"
+- original_text: "系统应支持不少于1000个并发用户同时在线，响应时间不超过2秒。"（从原文提取）
 - page_number: {node.start_index}
 - response_suggestion: "在技术方案中说明系统架构设计和负载均衡方案"
 - risk_warning: "需要进行压力测试验证并发性能"
 - notes: "关键性能指标"
+
+**示例3：标题和原文都有需求**
+```
+## 系统需采用B/S架构
+
+前端需支持Chrome、Firefox、Safari等主流浏览器，后端需支持分布式部署。
+```
+应提取为两条需求：
+1. requirement: "系统需采用B/S架构"
+   original_text: "系统需采用B/S架构"（从标题提取）
+   
+2. requirement: "前端支持主流浏览器，后端支持分布式部署"
+   original_text: "前端需支持Chrome、Firefox、Safari等主流浏览器，后端需支持分布式部署。"（从原文提取）
 """
     return prompt
