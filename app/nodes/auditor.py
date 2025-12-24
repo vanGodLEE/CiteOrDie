@@ -1,13 +1,11 @@
 """
-Auditor节点 - 去重与汇总
+Auditor节点 - 汇总与格式化
 
-负责汇总所有Worker的结果，进行简单去重
+负责汇总所有Worker的结果（不去重）
 """
 
 from typing import List
 from loguru import logger
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 from app.core.states import TenderAnalysisState, RequirementItem
 from app.core.config import settings
@@ -15,13 +13,17 @@ from app.core.config import settings
 
 def auditor_node(state: TenderAnalysisState) -> dict:
     """
-    Auditor节点 - 汇总和格式化（重构后：无需复杂去重）
+    Auditor节点 - 汇总和格式化（不去重版本）
     
-    业务逻辑（重构后）：
+    业务逻辑：
     1. 汇总所有Worker提取的需求
-    2. 可选的简单去重（基于original_text完全一致）
-    3. 按章节排序
-    4. 格式统一
+    2. 按章节排序
+    3. 格式统一
+    
+    注意：不进行去重！
+    - 不同章节可能包含相同的需求描述
+    - 去重会导致某些章节的需求信息丢失
+    - 保留所有需求，即使内容相同，因为它们来自不同的章节上下文
     
     Args:
         state: 全局状态
@@ -29,7 +31,7 @@ def auditor_node(state: TenderAnalysisState) -> dict:
     Returns:
         包含最终需求矩阵的字典
     """
-    logger.info("====== Auditor节点开始执行（重构后） ======")
+    logger.info("====== Auditor节点开始执行（不去重版本） ======")
     
     # 更新进度：开始质检
     task_id = state.get("task_id")
@@ -43,61 +45,18 @@ def auditor_node(state: TenderAnalysisState) -> dict:
         logger.warning("没有提取到任何需求")
         return {"final_matrix": []}
     
-    logger.info(f"开始处理 {len(requirements)} 条原始需求")
+    logger.info(f"开始处理 {len(requirements)} 条原始需求（不去重）")
     
-    # 步骤1: 简单去重（可选，仅去除完全相同的需求）
-    deduplicated = _simple_deduplicate_requirements(requirements)
-    if len(deduplicated) < len(requirements):
-        logger.info(f"简单去重后剩余 {len(deduplicated)} 条需求（去除了 {len(requirements) - len(deduplicated)} 条完全重复）")
+    # 步骤1: 按章节排序（不去重）
+    sorted_reqs = _sort_requirements(requirements)
     
-    # 步骤2: 按章节排序
-    sorted_reqs = _sort_requirements(deduplicated)
-    
-    # 步骤3: 格式统一
+    # 步骤2: 格式统一
     final_matrix = _normalize_requirements(sorted_reqs)
     
     logger.info(f"====== Auditor完成，最终输出 {len(final_matrix)} 条需求 ======")
     _print_summary(final_matrix)
     
     return {"final_matrix": final_matrix}
-
-
-def _simple_deduplicate_requirements(requirements: List[RequirementItem]) -> List[RequirementItem]:
-    """
-    简单去重：仅去除original_text完全相同的需求
-    
-    重构后说明：
-    - 由于使用了精确原文填充，理论上不应该有重复需求
-    - 此函数仅作为保险措施，去除万一出现的完全重复项
-    - 不再使用复杂的TF-IDF相似度计算
-    """
-    if len(requirements) <= 1:
-        return requirements
-    
-    try:
-        seen_texts = set()
-        deduplicated = []
-        removed_count = 0
-        
-        for req in requirements:
-            # 使用original_text作为去重依据
-            text_key = req.original_text.strip()
-            
-            if text_key not in seen_texts:
-                seen_texts.add(text_key)
-                deduplicated.append(req)
-            else:
-                removed_count += 1
-                logger.debug(f"去重：移除完全重复需求 {req.matrix_id}")
-        
-        if removed_count > 0:
-            logger.info(f"简单去重移除了 {removed_count} 条完全重复的需求")
-        
-        return deduplicated
-        
-    except Exception as e:
-        logger.warning(f"简单去重过程出错，返回原始列表: {e}")
-        return requirements
 
 
 def _sort_requirements(requirements: List[RequirementItem]) -> List[RequirementItem]:

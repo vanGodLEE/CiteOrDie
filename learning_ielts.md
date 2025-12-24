@@ -1,0 +1,62 @@
+2018.05.20
+    Some people think reading stories in book is better than watching TV or playing computer games for children. To what extent do you agree or disagree?
+    许多人认为读故事书比看电视或玩电脑游戏对孩子更加有益处，我认为这种观点有一定的道理，但是我更倾向于认为三者结合才是最好的选择。
+    诚然，读故事书能给孩子带来许多好处。首先，读故事书能够培养孩子的耐心和专注力，因为好的故事书通常都具备有趣的文字和生动的图片，这意味着孩子们能够更容易被吸引并保持注意力，因此，耐心和专注力也会在这个过程中得到提升。其次，读故事书有助于提高孩子语言组织能力，因为通过阅读孩子们能够积累更多的词汇并学习更多的表达逻辑，这对于他们日后的写作和口语表达都有很大的帮助。最后，读故事书还能激发孩子的想象力和创造力，因为故事书中的情节和角色往往充满了奇幻色彩，这能够激励孩子们去思考和创造属于自己的故事。
+    然而，我认为看电视和玩电脑游戏也有其独特的优势。首先，看电视节目可以让孩子们接触到丰富的的视觉和听觉信息，这有助于他们更全面地理解世界。例如，纪录片和教育类节目能够向孩子们展示各种自然现象和文化习俗，这些内容往往是书本上难以涵盖的。其次，玩电脑游戏可以培养孩子的反应能力和手眼协调能力，因为许多游戏都需要玩家快速做出反应并进行精确的操作，这对于孩子们的身体协调性有很大的帮助。此外，某些教育类游戏还能够提升孩子的逻辑思维和问题解决能力。
+    综上所述，虽然读故事书对孩子有诸多好处，但看电视和玩电脑游戏同样具有重要的价值。因此，我认为最理想的方式是将三者结合起来，让孩子们在不同的媒介中获得全面的发展。
+    Some people think reading story books benefits children more than watching  TV or playing computer games.I partly agree with this view, but I prefer that a combination of these three is the best choice.
+    Admittedly, reading story books can bring many benefits to children. Firstly, it can cultivate children's patience and concentration, because nice story books usually have interesting tests and vivid pictures, which means children can be attracted more easily and keep their concentration. Thus, patience and concentration can be improved in this process.
+    secondly, reading story books helps to improve children's language organization ability, because through reading, children can accumulate more vocabulary and learn more expression logic, which is very helpful for their speaking and writing in the future. 
+    Finally,reading story books can activate children‘s imagination and creativity,because the plots and characters in story books are often full of fantasy colors,  which can encourage children to think and create their own story.
+    However, I Think watching TV and playing computer games also have their unique advantages. Firstly, watching TV allows children to attach to rich visual and audiTory information, which helps them to understand the world more comprehensively. For example, documentaries and educational programs can show various of natural phenomena and cultural customs to children, which are insufficient in story books.
+    Secondly, playing computer games can promote children's ability of reaction and hand-eye coordination,because many games need players to react quickly and operate accurately, which is very helpful for children's physical coordination. In addition, some educational games can also improve children's logical thinking adn problem-solving ability.
+    In conclusion, although reading story books has many benefits, watching TV and playing computer games are also have important values. Therefore, I believe the best way is to combine all three, so that children can develop comprehensively in  different media.
+2017.11.11
+    Online shopping is now replacing shopping in stores. Do you think it is a positive or negative development?
+    网络购物正在取代实体店购物，我认为这件事既有积极的部分，又有消极的部分，但是整体来说，这是一个积极的发展趋势。
+    一方面，网络购物取代实体店购物可能会导致市场消费产品的质量下滑，具体表现在两个方面。
+    第一，一些商家不再将商品的质量当作重点，而是倾向于制作精美的网页广告来吸引顾客，因为客户网购时获取产品信息的第一条渠道不再是产品本身而变成了网页广告，这会导致顾客买到的产品质量逐渐变差。
+    第二，网络购物平台作为中间商的出现使得产品生产商的利润降低，这意味着，产品生产厂家不得不通过降低产品质量来节省成本，这从源头上降低了产品的质量。
+    另一方面，网络购物取代实体店购物会促进经济的发展。
+    首先，网络购物能够创许多新岗位，比如快递、电商及销售，网络购物取代实体店购物进程的加快会促进这些行业的发展，从而创造许多就业岗位，增加从业者的收入。
+    其次，网络购物能够最大限度的满足不同人群的购物需求，这不仅是因为网络购物超越了时间空间的限制，使得各种各样的商品都能展示在网络上，从而是客户的选择变多，还因为网络商品能够照顾特殊癖好人群的需求，是他们的购物体验变得隐私。这能促进人们消费频率的增加，从而促进经济的增长。
+    总体来说，虽然网络购物取代实体店购物有一定的负面影响，但是长远来看，只要人们能够想办法解决上屏质量下滑的问体，他就是一个积极发展趋势。
+    Online shopping is now replacing shopping in stores, I think it has both positive and negative aspects, but overall, it is a positive development.
+    On the one hand, the replacement of shopping in stores by online shopping may lead to a decline in the quality of consume products in the market, which is reflected in two aspects. Firstly, some merchants no longer focus on the quality of products, but prefer to make exquisite web advertisements to attractive customers, because the first channel for customers to achieve product information is no longer the product itself but the web advertisements, which will lead to the quality of products bought by customers to gradually deteriorate.
+    Secondly, the emergence of online shopping platforms as intermediaries has reduced the profile of products manufacturers, which means that products manufacturers have to decrease the quality of products to save costs, which reduces the quality of products from the source. 
+    On the other hand, the replacement of shopping in stores by online shopping will promote economic development.
+    Firstly, online shopping can create many new jobs, such as express delivery, e-commerce and sales. The acceleration of the replacement will enhance the development of these industries, thus creating many employment opportunities and income for practitioners.
+    Secondly, online shopping can meet the demands of different groups significantly, not only because online shopping transcends the limitations of time and space, enabling various kinds of products can be displayed on the internet, thereby increasing customers' selections, but also because online products can cover the demands of special hobbies from different groups, making the shopping experiences more private. This can promote the increase of people's consumption frequency, hence promoting economic growth. 
+    In conclusion,although the replacement of shopping in stores by online shopping has certain negative impacts, but in the long run, as long as people can find a method to solve the problem of quality decline, it is a positive development trend.
+2016.12.03
+    Some countries achieve international sporting success by building specialized fasciitis to train top athletes instead of providing sports facilities that everyone can use. Do you think it is a positive or negative development?
+    一些国家为了获得国际赛事的成功，通过建设专业体育设施来培养顶级运动员，而不是为所有人提供体育设施，我认为这种做法有积极的一面，但是长远来看是消极的。
+    一方面，建设专业体育设施来培养顶级运动员有助于提升国家的国际形象。其主要原因有两个。
+    第一，能够参加国际体育赛事的运动员们代表了世界上某项运动的顶尖水平，这意味着他们的成功不仅要靠个人天赋，更需要系统的训练、科学的管理以及专业的体育设施，而这些都需要强大的经济条件来支撑，因此，一个国家的运动员在国际赛事中取得优异成绩意味着这个国家在经济和科技方面有着强大的实力。
+    第二，一些国家的运动员通常都是代表这些国家来参赛的，因此，当这些国家的运动员在国际赛事中取得优异成绩时，往往会激发他们国民的爱国热情，从而提升国家的凝聚力和向心力。
+    另一方面，国家投入大量资金建设专业体育设施来培养顶级运动员，可能会有以下几个消极影响。
+    首先，这种做法会可能导致国家整体国民的身体素质下降，因为大部分资金都投入到了专业体育设施的建设上，而忽视了公共体育设施的建设，导致普通民众缺乏锻炼身体的场所，从而影响了整体国民的身体素质。
+    其次，这种做法会影响社会公平，因为购买专业设施需要投入大量资金，后续的为维护费用也很高，而这些资金往往来自于纳税人，这意味着，普通民众需要为少数顶级运动员的成功买单，而这些顶级运动员往往并不代表大多数人的利益，长期来看，这会导致社会的不公平。
+    总体来说，虽然建设专业体育设施来培养顶级运动员有助于提升国家的国际形象，但是从长远来看，这种做法可能会导致整体国民身体素质的下降以及社会公平性的缺失，因此，我认为这是一种消极的发展趋势。
+    For some countries, to achieve international sporting success, they build specialized facilities to train top athletes instead of providing sports facilities that everyone can use. I think this approach has its positive aspects, but in the long runm, it is a negative development.
+    on the one hand, building specialized sports facilities to train top athletes can improve a country's international influence. There are two main reasons for this. 
+    Firstly, athletes who can participate in international sports events represent the top level of a certain sport in the world, which means that their success not only relies on their personal talent, but also requires systematic training, scientific management and specialized sports facilities, all of which need strength economic conditions to support, thus, the excellent performance of a countries athletes in international events means that this country has strong strength in economy and technology.
+    Secondly, Some countries' athletes usually represent these countries to participate in competitions, therefore, when these athletes achieve excellent results in international events, they can activate their nationals' patriotism, thereby enhancing national cohesion and centripetal force.
+    On the other hand, a country investing a large amount of funds to build specialized sports facilities to train top athletes may have several negative impacts.
+    Firstly, this approach may lend to a decline in the overall physical fitness of the nation,because most of the funds are invested in the construction of specialized sports facilities, while ignore the public sport facilities buildings, lending to a a lack of places for ordinary people to exercise, thereby affecting the overall physical fitness of the nation.
+    Secondly, This behavior may affect social fairness, because purchasing specialized facilities needs a large amount of funds, and the subsequent maintenance costs are also high, and these funds often come from taxpayers, which means ordinary people need to pay for the success of a few top athletes, and these top athletes often do not represent the interests of the majority of people. In the long run, this will lead to social unfairness.
+    In conclusion, although building specialized sports facilities to train top athletes can help improve a country's international image, but in the long run, this approach may lead to a decline in the overall physical fitness of the nation and a lack of social fairness, therefore, I think it is a negative development.
+2013.12.21
+    Scientists advise people to lead a healthy lifestyle, but many people still continue with unhealthy activities. What are the reasons and what can we do to change the situation?
+    尽管科学家建议人们保持健康的生活方式，许多人仍然存在不健康的行为。我认为主要有两个原因，针对这些原因我们也可以采取两种措施来改变这种状况。
+    导致这种情况的第一个原因是人们普遍缺乏健康生活的意识。具体来说，大多人只有在生病难受时才会意识到健康的重要性。比如，大多数肥胖症患者往往在肥胖影响到他们的生命时才会意识到减肥的重要性，而在平时，他们往往为了满足口腹之欲而对健康置之不理。
+    第二个原因是现代人生活节奏快，压力大，导致他们没有时间和精力去保持健康的生活方式。比如，许多人在经过长时间的工作后，不得不选择快餐来解决饮食问题，亦或是通过抽烟、酗酒以及熬夜打游戏来缓解压力，而这些行为对身体伤害极大。再比如，许多人由于工作繁忙而没有时间和精力进行锻炼，从而导致身体素质下降。
+    针对上述原因，我认为，第一，人们需要从小培养人们的健康生活意识。具体来说，家庭教育和学校教育都应该将健康生活作为重要内容，从而让人们从小就树立健康生活的观念。
+    第二，政府和企业应该担负起社会会责任，帮助人们减轻生活压力，让人们有更多的时间和精力去保持健康。比如，政府应该严格履行劳工法，保障员工的合法权益，避免过度加班现象的出现。再比如，企业应该为员工提供健康的工作环境和福利待遇，从而让员工能够更好地平衡工作和生活。
+    总体来说，尽管科学家建议人们保持健康的生活方式，但由于人们缺乏健康生活的意识以及现代生活节奏快、压力大，许多人仍然存在不健康的行为。针对这些原因，人们可以通过从小培养健康生活意识以及政府和企业减轻人们生活压力来改变这种状况。
+    Although scientists advise people to keep a healthy lifestyle, many people still continue with unhealthy behaviors. I think there are two main reasons for this, and we can take two measures to change this situation.
+    The first reason for this situation is that people generally lack awareness of healthy living. Specifically, most of them only realize the importance of health when they are sick and uncomfortable. For example, most obese patients often realize the importance of losing weight when obesity affects their lives, while in normal times, they always ignore health to satisfy their appetite.
+    The second reason is that modern people have a fast pace of life and high pressure, which leads to their lack of time and energy to maintain a healthy lifestyle. For instance, many people have to choose fast food to solve dietary problems after long hours of work, or through smoking, drinking and a whole night of gaming to relieve stress, all of which are extremely harmful to the health. Moreover, many people have big workloads and lace time to exercise, leading a decline of physical fitness.
+    For above reasons, I believe, firstly, people need to promote healthy awareness from childhood. Specifically, family and school education should take healthy living as an important content, so children can establish the healthy living concept from an early age.
+    Secondly, governments and enterprises should take social responsibilities to help people reduce life pressure, so that people have more time and energy to keep healthy. For example, governments should strictly implement labor laws to protect employee's legal rights and avoid the emergency of overwork.Moreover, enterprises should provide healthy environments and welfare benefits for employees, so that employees can balance the work and life better.
+    Im conclusion, Although scientists advise people to keep a healthy lifestyle, due to the lack of healthy living awareness and the fast pace of modern life and high pressure, many people still continue with unhealthy activities. For these reasons,  people can change this situation through promoting healthy awareness from childhood and governments and enterprises reducing people's life pressure.

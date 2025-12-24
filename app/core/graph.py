@@ -74,19 +74,23 @@ def create_tender_analysis_graph():
     return graph
 
 
-def route_to_text_fillers(state: TenderAnalysisState) -> List[Send]:
+def route_to_text_fillers(state: TenderAnalysisState):
     """
     动态路由：为每个节点创建一个Send到text_filler（并行填充原文）
     
     策略：处理所有节点（包括父节点和叶子节点）
+    
+    特殊处理：如果pageindex_parser失败，直接跳转到END
     """
     pageindex_doc = state.get("pageindex_document")
     pdf_path = state.get("pdf_path")
     task_id = state.get("task_id")
+    error_message = state.get("error_message")
     
-    if not pageindex_doc:
-        logger.warning("未找到pageindex_document，无法路由到text_fillers")
-        return []
+    # 如果有错误消息或pageindex_document为None，说明解析失败，直接终止
+    if error_message or not pageindex_doc:
+        logger.error(f"PageIndex解析失败，工作流终止: {error_message or '未找到pageindex_document'}")
+        return END
     
     # 获取所有节点（父节点+叶子节点）
     all_nodes = []
