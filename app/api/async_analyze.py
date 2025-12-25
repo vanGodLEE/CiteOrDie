@@ -16,8 +16,19 @@ from app.api.async_tasks import TaskManager
 from app.core.graph import create_tender_analysis_graph
 from app.core.states import TenderAnalysisState, PageIndexDocument
 from app.services.excel_export import ExcelExportService
+from urllib.parse import urlparse, urlunparse
 
+MINIO_ENDPOINT = "192.168.100.219:19000"        # 你的 MinIO
+PROXY_BASE     = "/minio"
 router = APIRouter()
+
+def rewrite_minio_url_for_frontend(u: str) -> str:
+    p = urlparse(u)
+    if p.netloc != MINIO_ENDPOINT:
+        return u  # 非 MinIO 的 URL 不改
+    base = urlparse(PROXY_BASE)
+    new_path = base.path.rstrip("/") + p.path   # /minio + /bucket/object
+    return urlunparse((base.scheme, base.netloc, new_path, "", p.query, ""))
 
 
 async def run_analysis_task(task_id: str, pdf_path: str):
@@ -176,6 +187,25 @@ async def analyze_tender(
         file_size=len(content)
     )
     
+    # 上传到MinIO
+    try:
+        from app.services.minio_service import get_minio_service
+        minio_service = get_minio_service()
+        minio_url = minio_service.upload_pdf(str(file_path), task_id)
+        
+        # 更新任务的minio_url
+        from app.db.repositories import TaskRepository
+        from app.db.database import SessionLocal
+        db = SessionLocal()
+        try:
+            TaskRepository.update_task(db, task_id, {"minio_url": minio_url})
+        finally:
+            db.close()
+            
+        logger.info(f"✓ PDF已上传到MinIO: {minio_url}")
+    except Exception as e:
+        logger.warning(f"上传到MinIO失败（不影响分析流程）: {e}")
+    
     # 启动后台任务
     background_tasks.add_task(
         run_analysis_task,
@@ -289,7 +319,6 @@ async def get_task_info(task_id: str):
                 task["document_tree"] = task["result"].get("document_tree")
         finally:
             db.close()
-    
     return task
 
 
@@ -346,4 +375,59 @@ async def download_excel(task_id: str):
     except Exception as e:
         logger.error(f"生成Excel失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成Excel失败: {str(e)}")
+
+
+@router.get("/pdf/{task_id}")
+async def get_pdf_url(task_id: str):
+    """
+    获取PDF文件的MinIO访问URL
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        包含PDF URL的响应
+    """
+    # 获取任务信息
+    task = TaskManager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    # 从数据库获取minio_url
+    from app.db.repositories import TaskRepository
+    from app.db.database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        task_record = TaskRepository.get_task(db, task_id)
+        if not task_record:
+            raise HTTPException(status_code=404, detail="任务记录不存在")
+        
+        # 每次都从MinIO动态生成预签名URL（不从数据库读取）
+        # 原因：预签名URL有24小时有效期，不适合长期存储
+        try:
+            from app.services.minio_service import get_minio_service
+            minio_service = get_minio_service()
+            minio_url = minio_service.get_pdf_url(task_id)
+            
+            if not minio_url:
+                raise HTTPException(status_code=404, detail="未找到PDF文件")
+            
+            logger.debug(f"生成预签名URL成功: {minio_url[:100]}...")
+            
+            return {
+                "status": "success",
+                "task_id": task_id,
+                "file_name": task_record.file_name,
+                "minio_url": minio_url,
+                "message": "PDF文件URL获取成功（24小时有效）",
+                "url_for_frontend": rewrite_minio_url_for_frontend(minio_url)
+            }
+            
+        except Exception as e:
+            logger.error(f"从MinIO生成预签名URL失败: {e}")
+            raise HTTPException(status_code=500, detail=f"生成访问URL失败: {str(e)}")
+        
+    finally:
+        db.close()
 

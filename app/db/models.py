@@ -30,6 +30,7 @@ class Task(Base):
     file_name = Column(String(255), nullable=False, comment="原始文件名")
     file_size = Column(Integer, comment="文件大小（字节）")
     pdf_path = Column(String(500), comment="PDF存储路径")
+    minio_url = Column(String(500), comment="MinIO存储URL")
     use_mock = Column(Integer, default=0, comment="是否使用Mock数据 0-否 1-是")
     
     # 任务状态

@@ -95,6 +95,26 @@ class TaskRepository:
         return task
     
     @staticmethod
+    def update_task(
+        db: Session,
+        task_id: str,
+        updates: Dict[str, Any]
+    ) -> Optional[Task]:
+        """通用任务更新方法"""
+        task = db.query(Task).filter(Task.task_id == task_id).first()
+        if not task:
+            logger.warning(f"任务 {task_id} 不存在")
+            return None
+        
+        for key, value in updates.items():
+            if hasattr(task, key):
+                setattr(task, key, value)
+        
+        db.commit()
+        logger.debug(f"更新任务 {task_id}: {updates}")
+        return task
+    
+    @staticmethod
     def get_task(db: Session, task_id: str) -> Optional[Task]:
         """获取任务"""
         return db.query(Task).filter(Task.task_id == task_id).first()

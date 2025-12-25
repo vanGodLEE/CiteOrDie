@@ -90,6 +90,28 @@ class Settings(BaseSettings):
         description="允许的CORS来源"
     )
     
+    # ==================== Minio配置 ====================
+    minio_endpoint: str = Field(
+        default="192.168.100.219:19000",
+        description="MinIO服务器地址（S3 API端口，通常是9000或19000）"
+    )
+    minio_access_key: str = Field(
+        default="rag_flow",
+        description="MinIO访问密钥"
+    )
+    minio_secret_key: str = Field(
+        default="infini_rag_flow",
+        description="MinIO密钥"
+    )
+    minio_bucket: str = Field(
+        default="tender-pdf",
+        description="MinIO存储桶名称"
+    )
+    minio_secure: bool = Field(
+        default=False,
+        description="是否使用HTTPS连接MinIO"
+    )
+    
     # ==================== 业务配置 ====================
     max_parallel_workers: int = Field(
         default=5,
