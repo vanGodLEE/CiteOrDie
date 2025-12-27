@@ -638,16 +638,17 @@ def process_toc_no_page_numbers(toc_content, toc_page_list, page_list,  start_in
 def process_toc_with_page_numbers(toc_content, toc_page_list, page_list, toc_check_page_num=None, model=None, logger=None):
     toc_with_page_number = toc_transformer(toc_content, model)
     logger.info(f'toc_with_page_number: {toc_with_page_number}')
-
+    print(f'toc_with_page_number: {toc_with_page_number}')
     toc_no_page_number = remove_page_number(copy.deepcopy(toc_with_page_number))
     
     start_page_index = toc_page_list[-1] + 1
     main_content = ""
     for page_index in range(start_page_index, min(start_page_index + toc_check_page_num, len(page_list))):
         main_content += f"<physical_index_{page_index+1}>\n{page_list[page_index][0]}\n<physical_index_{page_index+1}>\n\n"
-
+    print(f'toc_no_page_number: {toc_no_page_number}')
     toc_with_physical_index = toc_index_extractor(toc_no_page_number, main_content, model)
     logger.info(f'toc_with_physical_index: {toc_with_physical_index}')
+    print(f'toc_with_physical_index: {toc_with_physical_index}')
 
     toc_with_physical_index = convert_physical_index_to_int(toc_with_physical_index)
     logger.info(f'toc_with_physical_index: {toc_with_physical_index}')

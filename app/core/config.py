@@ -46,20 +46,41 @@ class Settings(BaseSettings):
     
     # ==================== 节点级LLM配置 ====================
     # 每个LangGraph节点可以使用不同的模型
+    # 支持格式：
+    # - "provider:model" 如 "deepseek:deepseek-chat" 或 "openai:gpt-4o"
+    # - "model" 如 "deepseek-chat"（使用默认provider）
     
     structurizer_model: str = Field(
-        default="deepseek-chat",
-        description="PageIndex解析使用的模型"
+        default="deepseek:deepseek-chat",
+        description="PageIndex文档解析节点使用的模型（结构化提取）"
+    )
+    
+    # 429限流降级备用模型（逗号分隔）
+    # 当主模型被限流时，自动轮换到备用模型
+    # 示例：qwen3-max-preview,qwen-max,qwen-max
+    fallback_models: str = Field(
+        default="",
+        description="429限流时的备用模型列表（逗号分隔），为空则不启用降级"
+    )
+    
+    text_filler_model: str = Field(
+        default="deepseek:deepseek-chat",
+        description="Text Filler节点使用的模型（原文摘抄）"
+    )
+    
+    summary_model: str = Field(
+        default="deepseek:deepseek-chat",
+        description="Summary生成使用的模型（摘要生成）"
     )
     
     extractor_model: str = Field(
-        default="deepseek-chat",
-        description="Extractor节点使用的模型"
+        default="deepseek:deepseek-chat",
+        description="Enricher节点使用的模型（需求提取）"
     )
     
     auditor_model: str = Field(
-        default="deepseek-chat",
-        description="Auditor节点使用的模型"
+        default="deepseek:deepseek-chat",
+        description="Auditor节点使用的模型（目前未使用LLM）"
     )
     
     # ==================== 应用配置 ====================

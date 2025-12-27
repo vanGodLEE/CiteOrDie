@@ -149,7 +149,7 @@ def fill_single_node_text(
             
             logger.debug(f"   📥 PDF文本提取成功: 页面 [{start_page}, {end_page}]，文本长度: {len(page_text)}")
             
-            if page_text and len(page_text) > 20:
+            if page_text and len(page_text) > 8:
                 # 确定结束边界标题
                 end_boundary_title = None
                 if node.nodes:
@@ -165,7 +165,9 @@ def fill_single_node_text(
                     page_text=page_text,
                     end_boundary_title=end_boundary_title
                 )
-                
+                print(f"上标题: {node.title}")
+                print(f"正文: {original_text}")
+                print(f"标题: {end_boundary_title}")
                 # 记录LLM返回结果
                 if original_text:
                     logger.debug(f"   ✅ LLM提取原文成功: 长度 {len(original_text)}")
@@ -306,6 +308,7 @@ def extract_original_text_with_llm(
         # temperature=0确保精确摘录，不产生幻觉
         original_text = llm_service.text_completion(
             messages=messages,
+            model=settings.text_filler_model,  # 使用text_filler专用模型
             temperature=0,  # 设为0，确保确定性输出，避免幻觉
             max_tokens=4000  # 限制输出长度
         )
@@ -384,6 +387,7 @@ def generate_summary_from_text(
         
         summary = llm_service.text_completion(
             messages=messages,
+            model=settings.summary_model,  # 使用summary专用模型
             temperature=0.3,
             max_tokens=1000
         )
@@ -402,7 +406,7 @@ def build_text_extraction_prompt(
     end_boundary_title: Optional[str] = None
 ) -> str:
     """
-    构建精确原文提取的提示词（强化版 - 减少幻觉）
+    构建精确原文提取的提示词（极简版 - 杜绝思考过程）
     
     Args:
         node_title: 当前节点标题（提取起始标记）
@@ -413,49 +417,37 @@ def build_text_extraction_prompt(
         提示词文本
     """
     if end_boundary_title:
-        task_desc = f'"{node_title}"标题之后、"{end_boundary_title}"标题之前'
-        boundary_instruction = f'一旦看到"{end_boundary_title}"，立即停止'
+        boundary_desc = f'在"{end_boundary_title}"标题之前停止'
     else:
-        task_desc = f'"{node_title}"标题之后到页面结束'
-        boundary_instruction = '提取到页面结束或下一个标题前'
+        boundary_desc = '提取到文本结束'
     
-    prompt = f"""你是一个精确的文本摘录员。请从PDF文本中逐字摘录{task_desc}的内容。
+    prompt = f"""逐字摘抄PDF文本中"{node_title}"标题之后的内容，{boundary_desc}。
 
-⚠️ **极其重要的规则**：
-1. 你的任务是**摘录**，不是总结、不是改写、不是扩展
-2. 必须**逐字复制**原文，一个字都不能改，一个字都不能加
-3. 只摘录存在的内容，绝对不要添加任何解释、说明或你自己的理解
-4. 如果内容很短（只有几个字），那就只输出这几个字，不要试图扩展
-5. 保持原文的换行和格式
+【严格规则】
+1. 直接输出纯文本，不要输出任何思考过程、分析、解释或步骤
+2. 不要使用代码块、引号或任何格式标记
+3. 逐字复制原文，一字不改，一字不加
+4. 不包含标题本身，从标题后第一行开始
+5. 保留原文换行
+6. 如果找不到标题输出：TITLE_NOT_FOUND
+7. 如果标题后无内容输出：NO_CONTENT
 
-🔍 **操作步骤**：
-1. 在下面的文本中找到"{node_title}"标题
-2. 从标题**之后的第一行**开始复制
-3. {boundary_instruction}
-4. 不包含标题本身
-
-❌ **特殊情况**：
-- 找不到标题 → 只输出：TITLE_NOT_FOUND
-- 标题后无内容 → 只输出：NO_CONTENT
-
-✅ **正确示例**：
+【示例】
 PDF文本：
-```
 §2.1 安全要求
 系统需支持SSL加密。
+支持双因素认证。
 §2.2 性能要求
-```
+
 提取"§2.1 安全要求"应输出：
-```
 系统需支持SSL加密。
-```
-（只有这一句，不要加任何解释）
+支持双因素认证。
 
-📄 **待摘录的PDF文本**：
-```
+（直接输出以上两行，不要"正文："、"输出："等任何前缀或解释）
+
+【PDF文本】
 {page_text}
-```
 
-🎯 **开始逐字摘录**（不要添加"原文："等前缀）："""
+【立即输出摘抄结果】"""
     
     return prompt

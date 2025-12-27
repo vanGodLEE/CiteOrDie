@@ -48,6 +48,7 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
         # 解析PDF
         logger.info(f"调用文档解析器: {pdf_path}")
         result = pageindex_service.parse_pdf(pdf_path)
+        print(f"文档解析器返回结果:{result} ")
         
         # 验证返回结果
         if not isinstance(result, dict):

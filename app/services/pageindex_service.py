@@ -52,11 +52,13 @@ class PageIndexService:
     1. 调用PageIndex解析PDF，生成文档树结构
     2. 处理Unicode编码问题（中文标题转换）
     3. 提供统一的接口供LangGraph调用
+    4. 处理429限流错误，自动轮换备用模型
     """
     
     def __init__(
         self,
         model: str = "deepseek-chat",
+        fallback_models: Optional[List[str]] = None,
         toc_check_pages: int = 10,
         max_pages_per_node: int = 10,
         max_tokens_per_node: int = 8000,
@@ -69,7 +71,8 @@ class PageIndexService:
         初始化PageIndex服务
         
         Args:
-            model: LLM模型名称
+            model: LLM模型名称（主模型）
+            fallback_models: 备用模型列表（当主模型429限流时使用）
             toc_check_pages: 检查目录的页数范围
             max_pages_per_node: 每个节点最大页数
             max_tokens_per_node: 每个节点最大Token数
@@ -78,22 +81,32 @@ class PageIndexService:
             add_doc_description: 是否添加文档描述
             add_node_text: 是否添加节点文本
         """
-        self.model = model
-        self.config = pageindex_config(
-            model=model,
-            toc_check_page_num=toc_check_pages,
-            max_page_num_each_node=max_pages_per_node,
-            max_token_num_each_node=max_tokens_per_node,
-            if_add_node_id="yes" if add_node_id else "no",
-            if_add_node_summary="yes" if add_node_summary else "no",
-            if_add_doc_description="yes" if add_doc_description else "no",
-            if_add_node_text="yes" if add_node_text else "no"
-        )
-        logger.info(f"PageIndex服务初始化完成，模型: {model}")
+        self.primary_model = model
+        self.fallback_models = fallback_models or []
+        
+        # 构建完整模型列表：[主模型, 备用模型1, 备用模型2, ...]
+        self.all_models = [model] + self.fallback_models
+        self.current_model_index = 0  # 当前使用的模型索引
+        
+        self.toc_check_pages = toc_check_pages
+        self.max_pages_per_node = max_pages_per_node
+        self.max_tokens_per_node = max_tokens_per_node
+        self.add_node_id = add_node_id
+        self.add_node_summary = add_node_summary
+        self.add_doc_description = add_doc_description
+        self.add_node_text = add_node_text
+        
+        logger.info(f"PageIndex服务初始化完成")
+        logger.info(f"  - 主模型: {self.primary_model}")
+        if self.fallback_models:
+            logger.info(f"  - 备用模型: {', '.join(self.fallback_models)}")
+            logger.info(f"  - 429限流自动降级: 已启用")
+        else:
+            logger.info(f"  - 429限流自动降级: 未启用")
 
     def parse_pdf(self, pdf_path: str) -> Dict[str, Any]:
         """
-        解析PDF文件，生成文档树结构
+        解析PDF文件，生成文档树结构（支持429限流自动降级）
         
         Args:
             pdf_path: PDF文件路径
@@ -115,55 +128,82 @@ class PageIndexService:
         if not pdf_path.lower().endswith('.pdf'):
             raise ValueError("文件必须是PDF格式")
         
-        try:
-            logger.info("调用PageIndex库...")
-            logger.info(f"  - 模型: {self.config.model}")
-            logger.info(f"  - 目录检查页数: {self.config.toc_check_page_num}")
-            logger.info(f"  - 每节点最大页数: {self.config.max_page_num_each_node}")
-            
-            # 调用PageIndex主函数
-            result = page_index(
-                doc=pdf_path,
-                model=self.config.model,
-                toc_check_page_num=self.config.toc_check_page_num,
-                max_page_num_each_node=self.config.max_page_num_each_node,
-                max_token_num_each_node=self.config.max_token_num_each_node,
-                if_add_node_id=self.config.if_add_node_id,
-                if_add_node_summary=self.config.if_add_node_summary,
-                if_add_doc_description=self.config.if_add_doc_description,
-                if_add_node_text=self.config.if_add_node_text
-            )
-            
-            logger.info(f"PageIndex返回结果类型: {type(result)}")
-            
-            if not result:
-                raise ValueError("PageIndex返回结果为空")
-            
-            # 处理Unicode编码问题
-            result = self._decode_unicode_recursively(result)
-            
-            structure_count = len(result.get('structure', []))
-            logger.info(f"✓ PageIndex解析完成")
-            logger.info(f"  - 文档名称: {result.get('doc_name', '未知')}")
-            logger.info(f"  - 结构节点数: {structure_count}")
-            
-            if structure_count == 0:
-                logger.warning("⚠️ PageIndex未解析出任何结构节点")
-            
-            return result
-            
-        except IndexError as e:
-            logger.error(f"PageIndex解析时索引错误: {str(e)}")
-            logger.error("可能原因: PDF文档结构异常或PageIndex无法识别目录")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise Exception(f"索引错误: {str(e)}")
-        except Exception as e:
-            logger.error(f"PageIndex解析失败: {str(e)}")
-            logger.error(f"错误类型: {type(e).__name__}")
-            import traceback
-            logger.error(traceback.format_exc())
-            raise
+        # 尝试所有可用模型（主模型 + 备用模型）
+        for attempt, model in enumerate(self.all_models):
+            try:
+                is_fallback = attempt > 0
+                status = "备用模型" if is_fallback else "主模型"
+                
+                logger.info(f"尝试使用{status}: {model} (第{attempt + 1}/{len(self.all_models)}次)")
+                logger.info(f"  - 目录检查页数: {self.toc_check_pages}")
+                logger.info(f"  - 每节点最大页数: {self.max_pages_per_node}")
+                
+                # 调用PageIndex主函数
+                result = page_index(
+                    doc=pdf_path,
+                    model=model,
+                    toc_check_page_num=self.toc_check_pages,
+                    max_page_num_each_node=self.max_pages_per_node,
+                    max_token_num_each_node=self.max_tokens_per_node,
+                    if_add_node_id="yes" if self.add_node_id else "no",
+                    if_add_node_summary="yes" if self.add_node_summary else "no",
+                    if_add_doc_description="yes" if self.add_doc_description else "no",
+                    if_add_node_text="yes" if self.add_node_text else "no"
+                )
+                
+                logger.info(f"PageIndex返回结果类型: {type(result)}")
+                
+                if not result:
+                    raise ValueError("PageIndex返回结果为空")
+                
+                # 处理Unicode编码问题
+                result = self._decode_unicode_recursively(result)
+                print(result)
+                
+                structure_count = len(result.get('structure', []))
+                logger.info(f"✓ PageIndex解析完成（使用{status}: {model}）")
+                logger.info(f"  - 文档名称: {result.get('doc_name', '未知')}")
+                logger.info(f"  - 结构节点数: {structure_count}")
+                
+                if structure_count == 0:
+                    logger.warning("⚠️ PageIndex未解析出任何结构节点")
+                
+                # 成功，更新当前模型索引（下次从这个模型开始）
+                if is_fallback:
+                    self.current_model_index = attempt
+                    logger.info(f"✓ 备用模型成功，切换到: {model}")
+                
+                return result
+                
+            except Exception as e:
+                error_msg = str(e)
+                is_rate_limit = "429" in error_msg or "rate" in error_msg.lower() or "limit" in error_msg.lower()
+                
+                if is_rate_limit:
+                    logger.warning(f"⚠️ 模型 {model} 遇到429限流错误")
+                    
+                    # 如果还有备用模型，继续尝试
+                    if attempt < len(self.all_models) - 1:
+                        logger.info(f"→ 自动切换到下一个备用模型...")
+                        continue
+                    else:
+                        # 所有模型都失败了
+                        logger.error(f"❌ 所有模型（共{len(self.all_models)}个）都遇到429限流")
+                        raise Exception(
+                            f"所有配置的模型都遇到429限流错误。\n"
+                            f"尝试过的模型: {', '.join(self.all_models)}\n"
+                            f"建议：\n"
+                            f"1. 稍后重试\n"
+                            f"2. 检查API配额\n"
+                            f"3. 添加更多备用模型"
+                        )
+                else:
+                    # 非429错误，直接抛出
+                    logger.error(f"PageIndex解析失败（模型: {model}）: {error_msg}")
+                    logger.error(f"错误类型: {type(e).__name__}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+                    raise
 
     def _decode_unicode_recursively(self, obj: Any) -> Any:
         """
@@ -275,14 +315,24 @@ _pageindex_service: Optional[PageIndexService] = None
 
 def get_pageindex_service() -> PageIndexService:
     """
-    获取PageIndex服务单例
+    获取PageIndex服务单例（支持429限流自动降级）
     """
     global _pageindex_service
     if _pageindex_service is None:
         from app.core.config import settings
         
+        # 解析fallback_models（逗号分隔的字符串 → 列表）
+        fallback_models = []
+        if settings.fallback_models and settings.fallback_models.strip():
+            fallback_models = [
+                m.strip()
+                for m in settings.fallback_models.split(',')
+                if m.strip()
+            ]
+        
         _pageindex_service = PageIndexService(
-            model=settings.structurizer_model,  # 使用结构化器的模型配置
+            model=settings.structurizer_model,  # 主模型
+            fallback_models=fallback_models,    # 备用模型列表
             toc_check_pages=20,
             max_pages_per_node=10,
             max_tokens_per_node=20000,
