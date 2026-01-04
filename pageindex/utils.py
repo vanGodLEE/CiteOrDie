@@ -20,6 +20,10 @@ from types import SimpleNamespace as config
 API_KEY = os.getenv("DEEPSEEK_API_KEY")
 BASE_URL = os.getenv("DEEPSEEK_API_BASE")
 
+# 429限流自动降级配置
+FALLBACK_MODELS = os.getenv("FALLBACK_MODELS", "").strip()
+_FALLBACK_MODEL_LIST = [m.strip() for m in FALLBACK_MODELS.split(",") if m.strip()] if FALLBACK_MODELS else []
+
 # 预加载一个通用 tokenizer（OpenAI 生态里最常用、兼容中英文）
 _DEFAULT_ENCODING = tiktoken.get_encoding("cl100k_base")
 
@@ -47,85 +51,171 @@ def count_tokens(text, model=None):
     return len(tokens)
 
 def ChatGPT_API_with_finish_reason(model, prompt, api_key=API_KEY, chat_history=None):
+    # 构建模型列表：主模型 + 备用模型
+    all_models = [model] + _FALLBACK_MODEL_LIST
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key,base_url=BASE_URL)
-    for i in range(max_retries):
-        try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-            if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
-            else:
-                return response.choices[0].message.content, "finished"
+    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
+    
+    # 遍历所有可用模型
+    for model_idx, current_model in enumerate(all_models):
+        for i in range(max_retries):
+            try:
+                if chat_history:
+                    messages = chat_history
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.chat.completions.create(
+                    model=current_model,
+                    messages=messages,
+                    temperature=0,
+                )
+                
+                if model_idx > 0:
+                    logging.info(f"✓ 备用模型成功: {current_model}")
+                    
+                if response.choices[0].finish_reason == "length":
+                    return response.choices[0].message.content, "max_output_reached"
+                else:
+                    return response.choices[0].message.content, "finished"
 
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
+            except Exception as e:
+                error_str = str(e).lower()
+                # 检测429限流错误
+                if "429" in error_str or "rate" in error_str or "quota" in error_str:
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，立即切换
+                        logging.warning(f"⚠️ 模型 {current_model} 遇到429限流，切换到下一个备用模型...")
+                        break  # 跳出重试循环，尝试下一个模型
+                    else:
+                        # 已是最后一个模型，抛出异常
+                        logging.error(f"所有模型都遇到429限流，最后一个模型: {current_model}")
+                        raise
+                
+                # 其他错误继续重试
+                print('************* Retrying *************')
+                logging.error(f"Error: {e}")
+                if i < max_retries - 1:
+                    time.sleep(1)
+                else:
+                    # 当前模型重试次数用尽
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，切换
+                        logging.warning(f"模型 {current_model} 达到最大重试次数，切换到下一个备用模型...")
+                        break
+                    else:
+                        logging.error('所有模型都失败，最大重试次数已达')
+                        return "Error", "error"
+    
+    return "Error", "error"
 
 
 
 def ChatGPT_API(model, prompt, api_key=API_KEY, chat_history=None):
+    # 构建模型列表：主模型 + 备用模型
+    all_models = [model] + _FALLBACK_MODEL_LIST
     max_retries = 10
-    client = openai.OpenAI(api_key=api_key,base_url=BASE_URL)
-    for i in range(max_retries):
-        try:
-            if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
-            else:
-                messages = [{"role": "user", "content": prompt}]
-            
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0,
-            )
-   
-            return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                time.sleep(1)  # Wait for 1秒 before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"
-            
-
-async def ChatGPT_API_async(model, prompt, api_key=API_KEY):
-    max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
-    for i in range(max_retries):
-        try:
-            async with openai.AsyncOpenAI(api_key=api_key,base_url=BASE_URL) as client:
-                response = await client.chat.completions.create(
-                    model=model,
+    client = openai.OpenAI(api_key=api_key, base_url=BASE_URL)
+    
+    # 遍历所有可用模型
+    for model_idx, current_model in enumerate(all_models):
+        for i in range(max_retries):
+            try:
+                if chat_history:
+                    messages = chat_history
+                    messages.append({"role": "user", "content": prompt})
+                else:
+                    messages = [{"role": "user", "content": prompt}]
+                
+                response = client.chat.completions.create(
+                    model=current_model,
                     messages=messages,
                     temperature=0,
                 )
+       
+                if model_idx > 0:
+                    logging.info(f"✓ 备用模型成功: {current_model}")
                 return response.choices[0].message.content
-        except Exception as e:
-            print('************* Retrying *************')
-            logging.error(f"Error: {e}")
-            if i < max_retries - 1:
-                await asyncio.sleep(1)  # Wait for 1s before retrying
-            else:
-                logging.error('Max retries reached for prompt: ' + prompt)
-                return "Error"  
+            except Exception as e:
+                error_str = str(e).lower()
+                # 检测429限流错误
+                if "429" in error_str or "rate" in error_str or "quota" in error_str:
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，立即切换
+                        logging.warning(f"⚠️ 模型 {current_model} 遇到429限流，切换到下一个备用模型...")
+                        break  # 跳出重试循环，尝试下一个模型
+                    else:
+                        # 已是最后一个模型，抛出异常
+                        logging.error(f"所有模型都遇到429限流，最后一个模型: {current_model}")
+                        raise
+                
+                # 其他错误继续重试
+                print('************* Retrying *************')
+                logging.error(f"Error: {e}")
+                if i < max_retries - 1:
+                    time.sleep(1)
+                else:
+                    # 当前模型重试次数用尽
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，切换
+                        logging.warning(f"模型 {current_model} 达到最大重试次数，切换到下一个备用模型...")
+                        break
+                    else:
+                        logging.error('所有模型都失败，最大重试次数已达')
+                        return "Error"
+    
+    return "Error"
+            
+
+async def ChatGPT_API_async(model, prompt, api_key=API_KEY):
+    # 构建模型列表：主模型 + 备用模型
+    all_models = [model] + _FALLBACK_MODEL_LIST
+    max_retries = 10
+    messages = [{"role": "user", "content": prompt}]
+    
+    # 遍历所有可用模型
+    for model_idx, current_model in enumerate(all_models):
+        for i in range(max_retries):
+            try:
+                async with openai.AsyncOpenAI(api_key=api_key, base_url=BASE_URL) as client:
+                    response = await client.chat.completions.create(
+                        model=current_model,
+                        messages=messages,
+                        temperature=0,
+                    )
+                    if model_idx > 0:
+                        logging.info(f"✓ 备用模型成功: {current_model}")
+                    return response.choices[0].message.content
+            except Exception as e:
+                error_str = str(e).lower()
+                # 检测429限流错误
+                if "429" in error_str or "rate" in error_str or "quota" in error_str:
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，立即切换
+                        logging.warning(f"⚠️ 模型 {current_model} 遇到429限流，切换到下一个备用模型...")
+                        break  # 跳出重试循环，尝试下一个模型
+                    else:
+                        # 已是最后一个模型，抛出异常
+                        logging.error(f"所有模型都遇到429限流，最后一个模型: {current_model}")
+                        raise
+                
+                # 其他错误继续重试
+                print('************* Retrying *************')
+                logging.error(f"Error: {e}")
+                if i < max_retries - 1:
+                    await asyncio.sleep(1)
+                else:
+                    # 当前模型重试次数用尽
+                    if model_idx < len(all_models) - 1:
+                        # 还有备用模型，切换
+                        logging.warning(f"模型 {current_model} 达到最大重试次数，切换到下一个备用模型...")
+                        break
+                    else:
+                        logging.error('所有模型都失败，最大重试次数已达')
+                        return "Error"
+    
+    return "Error"
             
             
 def get_json_content(response):
@@ -570,25 +660,86 @@ def check_token_limit(structure, limit=110000):
 
 
 def convert_physical_index_to_int(data):
+    """
+    将physical_index字符串转换为整数。
+    
+    支持的格式:
+    - <physical_index_9>
+    - physical_index_9
+    - 已经是整数的情况
+    
+    增强的鲁棒性：
+    - 处理None值
+    - 处理转换失败的情况
+    - 添加详细的异常处理
+    
+    Args:
+        data: 列表、字符串或其他类型的数据
+        
+    Returns:
+        转换后的数据，失败的项会被设为None
+    """
     if isinstance(data, list):
         for i in range(len(data)):
-            # Check if item is a dictionary and has 'physical_index' key
+            # 检查是否为字典且包含physical_index键
             if isinstance(data[i], dict) and 'physical_index' in data[i]:
-                if isinstance(data[i]['physical_index'], str):
-                    if data[i]['physical_index'].startswith('<physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].rstrip('>').strip())
-                    elif data[i]['physical_index'].startswith('physical_index_'):
-                        data[i]['physical_index'] = int(data[i]['physical_index'].split('_')[-1].strip())
+                physical_index = data[i]['physical_index']
+                
+                # 如果已经是None，保持不变
+                if physical_index is None:
+                    continue
+                
+                # 如果已经是整数，保持不变
+                if isinstance(physical_index, int):
+                    continue
+                
+                # 如果是字符串，尝试转换
+                if isinstance(physical_index, str):
+                    try:
+                        if physical_index.startswith('<physical_index_'):
+                            # 格式: <physical_index_9>
+                            num_str = physical_index.split('_')[-1].rstrip('>').strip()
+                            data[i]['physical_index'] = int(num_str)
+                        elif physical_index.startswith('physical_index_'):
+                            # 格式: physical_index_9
+                            num_str = physical_index.split('_')[-1].strip()
+                            data[i]['physical_index'] = int(num_str)
+                        else:
+                            # 尝试直接转换为整数
+                            data[i]['physical_index'] = int(physical_index)
+                    except (ValueError, IndexError, AttributeError) as e:
+                        # 转换失败，设为None
+                        logging.warning(f"⚠️ 无法转换physical_index: {physical_index}, 错误: {e}")
+                        data[i]['physical_index'] = None
+                else:
+                    # 既不是字符串也不是整数，设为None
+                    logging.warning(f"⚠️ physical_index类型不支持: {type(physical_index)}")
+                    data[i]['physical_index'] = None
+                    
     elif isinstance(data, str):
-        if data.startswith('<physical_index_'):
-            data = int(data.split('_')[-1].rstrip('>').strip())
-        elif data.startswith('physical_index_'):
-            data = int(data.split('_')[-1].strip())
-        # Check data is int
-        if isinstance(data, int):
-            return data
-        else:
+        # 单个字符串的转换
+        try:
+            if data.startswith('<physical_index_'):
+                num_str = data.split('_')[-1].rstrip('>').strip()
+                return int(num_str)
+            elif data.startswith('physical_index_'):
+                num_str = data.split('_')[-1].strip()
+                return int(num_str)
+            else:
+                # 尝试直接转换
+                return int(data)
+        except (ValueError, IndexError, AttributeError):
+            # 转换失败返回None
             return None
+            
+    elif isinstance(data, int):
+        # 已经是整数，直接返回
+        return data
+    
+    elif data is None:
+        # None值保持不变
+        return None
+        
     return data
 
 

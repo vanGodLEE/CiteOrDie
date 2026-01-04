@@ -18,17 +18,7 @@ from app.core.states import TenderAnalysisState, PageIndexDocument
 from app.services.excel_export import ExcelExportService
 from urllib.parse import urlparse, urlunparse
 
-MINIO_ENDPOINT = "192.168.100.219:19000"        # 你的 MinIO
-PROXY_BASE     = "/minio"
 router = APIRouter()
-
-def rewrite_minio_url_for_frontend(u: str) -> str:
-    p = urlparse(u)
-    if p.netloc != MINIO_ENDPOINT:
-        return u  # 非 MinIO 的 URL 不改
-    base = urlparse(PROXY_BASE)
-    new_path = base.path.rstrip("/") + p.path   # /minio + /bucket/object
-    return urlunparse((base.scheme, base.netloc, new_path, "", p.query, ""))
 
 
 async def run_analysis_task(task_id: str, pdf_path: str):

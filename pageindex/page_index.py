@@ -408,32 +408,75 @@ def extract_matching_page_pairs(toc_page, toc_physical_index, start_page_index):
 
 
 def calculate_page_offset(pairs):
+    """
+    计算页码偏移量。
+    
+    Args:
+        pairs: 包含物理索引和页码的配对列表
+        
+    Returns:
+        int or None: 最常见的偏移量，如果无法计算则返回None
+    """
     differences = []
     for pair in pairs:
         try:
             physical_index = pair['physical_index']
             page_number = pair['page']
+            # 确保两个值都是有效的整数
+            if physical_index is None or page_number is None:
+                continue
+            if not isinstance(physical_index, int) or not isinstance(page_number, int):
+                continue
             difference = physical_index - page_number
             differences.append(difference)
-        except (KeyError, TypeError):
+        except (KeyError, TypeError, ValueError) as e:
             continue
     
     if not differences:
         return None
     
+    # 统计每个偏移量出现的次数
     difference_counts = {}
     for diff in differences:
         difference_counts[diff] = difference_counts.get(diff, 0) + 1
     
+    # 返回出现次数最多的偏移量
     most_common = max(difference_counts.items(), key=lambda x: x[1])[0]
     
     return most_common
 
 def add_page_offset_to_toc_json(data, offset):
+    """
+    为TOC数据添加页码偏移量。
+    
+    Args:
+        data: TOC数据列表
+        offset: 页码偏移量（可能为None）
+        
+    Returns:
+        list: 处理后的TOC数据
+    """
+    # 如果offset为None，保持原样但移除page字段
+    if offset is None:
+        for i in range(len(data)):
+            if 'page' in data[i]:
+                # 没有有效的offset，无法计算physical_index
+                # 将physical_index设置为None，后续会被过滤掉
+                data[i]['physical_index'] = None
+                del data[i]['page']
+        return data
+    
+    # 正常处理：添加offset
     for i in range(len(data)):
         if data[i].get('page') is not None and isinstance(data[i]['page'], int):
-            data[i]['physical_index'] = data[i]['page'] + offset
-            del data[i]['page']
+            try:
+                data[i]['physical_index'] = data[i]['page'] + offset
+                del data[i]['page']
+            except (TypeError, ValueError) as e:
+                # 计算失败，设置为None
+                data[i]['physical_index'] = None
+                if 'page' in data[i]:
+                    del data[i]['page']
     
     return data
 

@@ -63,9 +63,30 @@
 2014.04
     Some people say the purpose of education is to prepare individuals to be useful to society. Others say the purpose of education is to achieve personal ambitions. Discuss both views and give your own opinion.
     教育到底是为了让自己对社会有用，还是为了实现个人的报复仍然存在争议，我更赞同后者的观点，因为我认为，只有实现了个人的抱负，才能更好地为社会做贡献。
-    诚然，为了让个人对社会会有用而接受教育并不是一个错误的观点。首先，社会的发展离不开教育的普及，因为社会中存在着许多不同的问题需要人们去解决，而教育能够帮助人们掌握解决问题的知识和技能，比如，医学教育能够培养医生来治疗疾病，从而提升整体社会的健康水平。其次，教育能够帮助人们更好地适应社会的发展变化，因为随着科技的进步和社会的变迁，许多传统的知识和技能已经不再适用，而教育能够帮助人们学习新的知识和技能，从而更好地适应社会的发展需求。
-    然而，我认为，教育最根本的目的还是自我实现。首先，只有实现了个人抱负，才嫩更好的回馈社会，因为个人抱负的实现往往意味着能力的提升和收入的增加，这意味着只有实现了个人抱负，才能调动更多社会会资源，创造更多财富，为社会缴纳更多的税收，从而支撑社会的发展。其次，教育成功与否只能通过个人抱负是否实现来衡量，因为每个人对教育的期望和目标都是不同的，只有实现了个人的抱负，才能说明教育具有普适性，且达到了预期的效果。
+    诚然，为了让个人对社会会有用而接受教育并不是一个错误的观点。首先，社会的发展离不开教育的普及，因为社会中存在着许多不同的问题需要人们去解决，而教育能够帮助人们掌握解决问题的知识和技能，比如，医学教育能够培养医生来治疗疾病，从而提升整体社会的健康水平。
+    其次，教育能够帮助人们更好地适应社会的发展变化，因为随着科技的进步和社会的变迁，许多传统的知识和技能已经不再适用，而教育能够帮助人们学习新的知识和技能，从而更好地适应社会的发展需求。
+    然而，我认为，教育最根本的目的还是自我实现。首先，只有实现了个人抱负，才嫩更好的回馈社会，因为个人抱负的实现往往意味着能力的提升和收入的增加，这意味着只有实现了个人抱负，才能调动更多社会会资源，创造更多财富，为社会缴纳更多的税收，从而支撑社会的发展。
+    其次，教育成功与否只能通过个人抱负是否实现来衡量，因为每个人对教育的期望和目标都是不同的，只有实现了个人的抱负，才能说明教育具有普适性，且达到了预期的效果。
     综上所述，虽然教育为了让个人对社会有用并不是一个错误的观点，但我认为教育最根本的目的还是自我实现，只有实现了个人抱负，才能更好地为社会做贡献。
-    The purpose od education is to prepare individuals to be useful to society or to achieve personal ambitions is remain a controversial dispute. I stronger believe in the latter view, because I think that people only can contribute to society better after achieving their personal ambitions.
+    The purpose of education is to prepare individuals to be useful to society or to achieve personal ambitions is remain a controversial dispute. I stronger believe in the latter view, because I think that people only can contribute to society better after achieving their personal ambitions.
     Admittedly, it is not a wrong view to accept education in order to make oneself useful to society. Firstly,the society can not develop without the popularization of education, because there are different problems in the society need to be solved, and education can help people to learn the knowledge and skills to solve problems. For example, medical education can train doctors to treat diseases, thereby improving the overall health level of society.
-    Secondly, education can help people to adapt the develo
+    Secondly, education can help people to adapt the development and changes of society better,because with the progress of technology and the development of society, many traditional knowledge and skills are no longer applicable, and education can help people to learn new knowledge and skills, thus adapting the development of the society better.
+    However, I maintain that the fundamental purpose of education is self-completion. Firstly, only after achieving personal ambitions can people give back to society better,because the achievement od personal ambitions often means the improvement of ability and the increase of income, which means that only after achieving personal ambitions can people mobilize more social resources, create more wealth, and  pay more taxes to support the development of society.
+    Secondly, the success of education can only be measured by whether personal ambitions are achieved, because everyone's expectations and goals for education are different, only after achieving personal ambitions can it be said that education is universal and has achieved the expected results.
+    In conclusion, although it is not a wrong view that education is to make individuals useful to society, I maintain that the fundamental purpose of education is self-completion, only after achieving personal ambitions can people contribute to society better.
+2014.08.09
+    Some people think that the government should ban dangerous sports, but others think that people should have the freedom to choose sports activities. Discuss both views and give your opinion.
+    (2011 年7月 30 日 Some people think government should ban dangerous sports, while others think it is people's freedom to do whatever sports activities they choose. Discuss both views and give your opinion.)
+    政府应该禁止危险运动还是让人们自由选择运动项目一直存在争议， 我更赞同后者的观点，因为我认为，禁止危险运动并不能从根本上解决问题，反而会限制人们的自由。
+    诚然，禁止危险运动可以在一定程度上减少运动事故的发生。 首先，危险运动相较于传统运动来说，具有更高的观赏性，这意味着，危险运动往往会吸引更多的参与者，而这些参与者中有许多人可能并没有接受过专业的训练，只是受好奇心的驱使便参与其中，这无疑会增加事故发生的概率。
+    其次，一些危险运动会不断加深运动员的冒险心理，美名其曰“挑战自我”，但实际上，这种冒险心理总会使运动员挑战成功后变得更加侥幸，从而忽视了危险运动本身的风险，最终导致事故的发生。
+    然而，我认为，禁止危险运动并不能从根本上解决问题，反而会限制人们的自由。 首先，发生运动事故的根本原因在于人们缺乏安全意识，而不是危险运动本身。比如，健身这项运动并不危险，但如果人们在没有正确指导的情况下盲目锻炼，依然会导致运动事故的发生。因此，与其禁止危险运动，不如加强正确的运动理念，提高人们的安全运动意识。
+    其次，禁止危险运动会限制人们的自由。 具体来说，运动本身就是一种自由选择的活动，而危险运动更是体现了人们对自由的追求。 比如，许多极限运动爱好者正是通过挑战危险运动来实现自我价值的，因此，禁止危险运动无疑会剥夺人们追求自由的权利。
+    综上所述，虽然禁止危险运动可以在一定程度上减少运动事故的发生，但我认为，禁止危险运动并不能从根本上解决问题，反而会限制人们的自由。
+    Whether the government should ban dangerous sports or allow people to choose sports activities freely is remain a controversial dispute. I stronger believe in the latter view, because I think that banning dangerous sports can not solve the problem fundamentally, but limit people's freedom.
+    Admittedly, banning dangerous sports can reduce sports accidents to some extent. Firstly, compared with traditional sports, dangerous sports have higher ornamental value, which means that those sports can attract more participants, most of them may not have received professional training but just participate out of their curiosity, which undoubtedly increase the probability of accidents.
+    Secondly, some dangerous sports will deepen athlete's adventurous psychology, under the pretext of "challenging oneself", but in fact, this adventurous psychology will make athletes more lucky after successfully challenging, thereby ignoring the risk of dangerous sports itself, eventually leading to accidents.
+    However, I maintain that banning dangerous sports can not solve the problem fundamentally, but limit people's freedom. Firstly, the fundamental reason of sports accidents is that people lack safety awareness, not dangerous sports itself. For instance, fitness is not dangerous, but if people exercise blindly without correct guidance, sports accidents will still happen. Thereby, instead of banning dangerous sports, it is better to improve correct sports concepts and enhance people's safety awareness.
+    Secondly, banning dangerous sports will limit people's freedom. Specifically, sport itself is a freely chosen activity, and dangerous sports reflect people's pursuit of freedom. For example, many extreme sports enthusiasts realize their self-worth through challenging dangerous sports, therefore, banning dangerous sports undoubtedly deprives people of the right to pursue freedom.
+    In conclusion, although banning dangerous sports can reduce sports accidents to some extent, I maintain that banning dangerous sports can not solve the problem fundamentally, but limit people's freedom.
+    
