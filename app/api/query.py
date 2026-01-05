@@ -29,7 +29,9 @@ class TaskSummary(BaseModel):
     total_sections: int
     total_requirements: int
     created_at: datetime
+    started_at: Optional[datetime]
     completed_at: Optional[datetime]
+    elapsed_seconds: float
 
 
 class TaskDetail(BaseModel):
@@ -46,6 +48,7 @@ class TaskDetail(BaseModel):
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
+    elapsed_seconds: float
 
 
 class LogItem(BaseModel):
@@ -106,7 +109,9 @@ def list_tasks(
                 total_sections=t.total_sections,
                 total_requirements=t.total_requirements,
                 created_at=t.created_at,
-                completed_at=t.completed_at
+                started_at=t.started_at,
+                completed_at=t.completed_at,
+                elapsed_seconds=t.elapsed_seconds or 0.0
             )
             for t in tasks
         ]
@@ -137,7 +142,8 @@ def get_task_detail(task_id: str):
             total_requirements=task.total_requirements,
             created_at=task.created_at,
             started_at=task.started_at,
-            completed_at=task.completed_at
+            completed_at=task.completed_at,
+            elapsed_seconds=task.elapsed_seconds or 0.0
         )
     finally:
         db.close()

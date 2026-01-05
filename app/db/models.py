@@ -43,10 +43,14 @@ class Task(Base):
     total_sections = Column(Integer, default=0, comment="筛选出的章节数")
     total_requirements = Column(Integer, default=0, comment="提取的需求总数")
     
+    # 分析结果（JSON存储）
+    document_tree_json = Column(Text, comment="PageIndex文档树结构（JSON格式）")
+    
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="任务创建时间")
     started_at = Column(DateTime, comment="开始执行时间")
     completed_at = Column(DateTime, comment="完成时间")
+    elapsed_seconds = Column(Float, default=0.0, comment="任务耗时（秒）")
     
     # 关联关系
     logs = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")

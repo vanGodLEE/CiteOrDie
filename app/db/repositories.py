@@ -46,7 +46,9 @@ class TaskRepository:
         status: str = None,
         progress: float = None,
         message: str = None,
-        error: str = None
+        error: str = None,
+        elapsed_seconds: float = None,
+        document_tree: dict = None
     ) -> Optional[Task]:
         """更新任务状态"""
         task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -60,6 +62,9 @@ class TaskRepository:
                 task.started_at = datetime.now()
             elif status in ["completed", "failed"]:
                 task.completed_at = datetime.now()
+                # 计算最终耗时（如果有开始时间）
+                if task.started_at and not elapsed_seconds:
+                    elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
         
         if progress is not None:
             task.progress = progress
@@ -69,6 +74,14 @@ class TaskRepository:
         
         if error:
             task.error_message = error
+        
+        if elapsed_seconds is not None:
+            task.elapsed_seconds = elapsed_seconds
+        
+        # 保存document_tree（JSON序列化）
+        if document_tree is not None:
+            import json
+            task.document_tree_json = json.dumps(document_tree, ensure_ascii=False)
         
         db.commit()
         return task

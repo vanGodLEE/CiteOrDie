@@ -96,7 +96,8 @@ class TaskManager:
         progress: float = None,
         message: str = None,
         result: dict = None,
-        error: str = None
+        error: str = None,
+        document_tree: dict = None
     ):
         """更新任务状态"""
         if task_id not in task_store:
@@ -145,14 +146,16 @@ class TaskManager:
         try:
             db = get_db_session()
             try:
-                # 更新任务状态
+                # 更新任务状态（包括elapsed_seconds和document_tree）
                 TaskRepository.update_task_status(
                     db,
                     task_id=task_id,
                     status=status,
                     progress=progress,
                     message=message,
-                    error=error
+                    error=error,
+                    elapsed_seconds=task.get("elapsed_seconds"),
+                    document_tree=document_tree
                 )
                 
                 # 记录日志（用于复盘）
@@ -176,8 +179,49 @@ class TaskManager:
     
     @staticmethod
     def get_task(task_id: str) -> Optional[dict]:
-        """获取任务状态（从内存）"""
-        return task_store.get(task_id)
+        """
+        获取任务状态
+        
+        策略：优先从内存读取，如果不存在则从数据库恢复
+        这样可以解决项目重启后任务消失的问题
+        """
+        # 1. 先尝试从内存读取
+        if task_id in task_store:
+            return task_store[task_id]
+        
+        # 2. 内存中不存在，尝试从数据库恢复
+        try:
+            db = get_db_session()
+            try:
+                task_record = TaskRepository.get_task(db, task_id)
+                if not task_record:
+                    return None
+                
+                # 将数据库记录转换为内存格式
+                task_dict = {
+                    "task_id": task_record.task_id,
+                    "status": task_record.status,
+                    "progress": task_record.progress,
+                    "message": task_record.current_message or "",
+                    "result": None,  # result不存储在task表，需要单独查询
+                    "error": task_record.error_message,
+                    "created_at": task_record.created_at,
+                    "updated_at": task_record.completed_at or task_record.started_at or task_record.created_at,
+                    "start_time": task_record.started_at,
+                    "elapsed_seconds": task_record.elapsed_seconds or 0,
+                    "logs": []  # 日志可以从task_logs表恢复，但为了性能这里不加载
+                }
+                
+                # 恢复到内存（用于后续访问）
+                task_store[task_id] = task_dict
+                logger.info(f"从数据库恢复任务: {task_id}")
+                
+                return task_dict
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"从数据库恢复任务失败: {e}")
+            return None
     
     @staticmethod
     def log_progress(task_id: str, message: str, progress: float = None):

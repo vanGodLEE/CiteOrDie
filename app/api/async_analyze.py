@@ -17,9 +17,17 @@ from app.core.graph import create_tender_analysis_graph
 from app.core.states import TenderAnalysisState, PageIndexDocument
 from app.services.excel_export import ExcelExportService
 from urllib.parse import urlparse, urlunparse
-
+MINIO_ENDPOINT = "192.168.100.219:19000"        # 你的 MinIO
+PROXY_BASE     = "/tender-minio"
 router = APIRouter()
 
+def rewrite_minio_url_for_frontend(u: str) -> str:
+    p = urlparse(u)
+    if p.netloc != MINIO_ENDPOINT:
+        return u  # 非 MinIO 的 URL 不改
+    base = urlparse(PROXY_BASE)
+    new_path = base.path.rstrip("/") + p.path   # /minio + /bucket/object
+    return urlunparse((base.scheme, base.netloc, new_path, "", p.query, ""))
 
 async def run_analysis_task(task_id: str, pdf_path: str):
     """
@@ -111,12 +119,12 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         finally:
             db.close()
         
-        # 将树结构转换为字典（用于JSON序列化）
+        # 将树结构转换为字典（用于JSON序列化和数据库存储）
         tree_data = None
         if pageindex_doc:
             tree_data = pageindex_doc.model_dump()
         
-        # 更新任务状态为完成
+        # 更新任务状态为完成（包括document_tree持久化到数据库）
         TaskManager.update_task(
             task_id,
             status="completed",
@@ -124,8 +132,9 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             message=f"分析完成！共提取 {len(final_matrix)} 条需求",
             result={
                 "requirements_count": len(final_matrix),
-                "document_tree": tree_data  # 保存完整树结构
-            }
+                "document_tree": tree_data  # 保存完整树结构到内存
+            },
+            document_tree=tree_data  # 持久化到数据库
         )
         
     except Exception as e:
@@ -267,7 +276,9 @@ async def get_progress(task_id: str):
 @router.get("/task/{task_id}")
 async def get_task_info(task_id: str):
     """
-    获取任务信息（包括最终需求矩阵）
+    获取任务信息（包括最终需求矩阵和文档树）
+    
+    重要：无论任务是从内存还是数据库恢复，都能正确返回完整数据
     """
     task = TaskManager.get_task(task_id)
     
@@ -277,13 +288,15 @@ async def get_task_info(task_id: str):
             "message": "任务不存在"
         }
     
-    # 如果任务完成，从数据库读取需求矩阵
+    # 如果任务完成，从数据库读取完整数据（支持重启后恢复）
     if task["status"] == "completed":
-        from app.db.repositories import RequirementRepository
+        from app.db.repositories import RequirementRepository, TaskRepository
         from app.db.database import SessionLocal
+        import json
         
         db = SessionLocal()
         try:
+            # 1. 读取需求矩阵
             requirements = RequirementRepository.get_requirements(db, task_id)
             
             # 转换为字典格式
@@ -301,14 +314,31 @@ async def get_task_info(task_id: str):
                     "notes": req.notes
                 })
             
+            # 总是设置matrix和requirements_count
             task["matrix"] = matrix
             task["requirements_count"] = len(matrix)
             
-            # 如果任务result中包含document_tree，也返回
+            # 2. 读取document_tree（优先从内存，再从数据库）
+            document_tree = None
+            
+            # 尝试从内存result获取
             if task.get("result") and isinstance(task["result"], dict):
-                task["document_tree"] = task["result"].get("document_tree")
+                document_tree = task["result"].get("document_tree")
+            
+            # 如果内存没有，从数据库读取
+            if not document_tree:
+                task_record = TaskRepository.get_task(db, task_id)
+                if task_record and task_record.document_tree_json:
+                    try:
+                        document_tree = json.loads(task_record.document_tree_json)
+                    except Exception as e:
+                        logger.error(f"解析document_tree失败: {e}")
+            
+            task["document_tree"] = document_tree
+                
         finally:
             db.close()
+    
     return task
 
 
