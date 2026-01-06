@@ -161,9 +161,10 @@ class Requirement(Base):
     section_title = Column(String(500), comment="章节标题")
     page_number = Column(Integer, comment="页码")
     
-    # 需求内容（8字段模型）
+    # 需求内容（9字段模型）
     requirement = Column(Text, nullable=False, comment="需求内容")
     original_text = Column(Text, nullable=False, comment="原文")
+    category = Column(String(20), default="OTHER", comment="需求类型：SOLUTION/QUALIFICATION/BUSINESS/FORMAT/PROCESS/OTHER")
     response_suggestion = Column(Text, comment="应答方向")
     risk_warning = Column(Text, comment="风险提示")
     notes = Column(Text, comment="备注")

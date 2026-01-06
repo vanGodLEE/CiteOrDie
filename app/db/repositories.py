@@ -236,6 +236,7 @@ class RequirementRepository:
                 page_number=data.get("page_number"),
                 requirement=data.get("requirement"),
                 original_text=data.get("original_text"),
+                category=data.get("category", "OTHER"),  # 新增：需求类型
                 response_suggestion=data.get("response_suggestion"),
                 risk_warning=data.get("risk_warning"),
                 notes=data.get("notes"),

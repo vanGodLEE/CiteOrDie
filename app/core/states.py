@@ -20,15 +20,16 @@ class RequirementItem(BaseModel):
     """
     需求条款模型
     
-    8个字段：
+    9个字段：
     1. 需求ID - 自动生成
     2. 需求 - 提取的需求内容
     3. 原文 - 对应原文
     4. 章节 - 对应的章节
     5. 页码 - 对应的页码
-    6. 应答方向 - AI生成的建议
-    7. 风险提示 - AI生成的风险提示
-    8. 备注 - AI生成的备注
+    6. 类型 - 需求类型分类（新增）
+    7. 应答方向 - AI生成的建议
+    8. 风险提示 - AI生成的风险提示
+    9. 备注 - AI生成的备注
     """
     
     matrix_id: str = Field(..., description="需求唯一ID，格式：{section_id}-REQ-{序号}")
@@ -37,6 +38,10 @@ class RequirementItem(BaseModel):
     section_id: str = Field(..., description="章节编号")
     section_title: str = Field(..., description="章节标题")
     page_number: int = Field(..., description="PDF页码")
+    category: str = Field(
+        default="OTHER",
+        description="需求类型：SOLUTION(技术/服务方案)|QUALIFICATION(资质)|BUSINESS(商务)|FORMAT(格式)|PROCESS(流程)|OTHER(其他/不确定)"
+    )
     response_suggestion: str = Field(..., description="应答方向建议")
     risk_warning: str = Field(..., description="风险提示")
     notes: str = Field(..., description="备注")

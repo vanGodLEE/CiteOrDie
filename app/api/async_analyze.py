@@ -108,6 +108,7 @@ async def run_analysis_task(task_id: str, pdf_path: str):
                     "section_id": req.section_id,
                     "section_title": req.section_title,
                     "page_number": req.page_number,
+                    "category": req.category if hasattr(req, 'category') else "OTHER",  # 新增：需求类型
                     "response_suggestion": req.response_suggestion,
                     "risk_warning": req.risk_warning,
                     "notes": req.notes
@@ -309,6 +310,7 @@ async def get_task_info(task_id: str):
                     "section_id": req.section_id,
                     "section_title": req.section_title,
                     "page_number": req.page_number,
+                    "category": req.category or "OTHER",  # 新增：需求类型
                     "response_suggestion": req.response_suggestion,
                     "risk_warning": req.risk_warning,
                     "notes": req.notes
