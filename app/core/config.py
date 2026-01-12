@@ -44,6 +44,20 @@ class Settings(BaseSettings):
         description="DeepSeek模型名称"
     )
     
+    # Qwen-VL配置（阿里云通义千问视觉模型）
+    qwen_api_key: str = Field(
+        default="",
+        description="Qwen API密钥（用于视觉模型）"
+    )
+    qwen_api_base: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        description="Qwen API基础URL"
+    )
+    qwen_vl_model: str = Field(
+        default="qwen-vl-max-latest",
+        description="Qwen视觉模型名称"
+    )
+    
     # ==================== 节点级LLM配置 ====================
     # 每个LangGraph节点可以使用不同的模型
     # 支持格式：
@@ -81,6 +95,11 @@ class Settings(BaseSettings):
     auditor_model: str = Field(
         default="deepseek:deepseek-chat",
         description="Auditor节点使用的模型（目前未使用LLM）"
+    )
+    
+    vision_model: str = Field(
+        default="qwen:qwen-vl-max-latest",
+        description="视觉模型配置（用于图片/表格的智能分析），格式：provider:model"
     )
     
     # ==================== 应用配置 ====================

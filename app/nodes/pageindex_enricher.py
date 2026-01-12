@@ -1,11 +1,14 @@
 """
 PageIndex需求提取节点（Enricher）
 遍历PageIndex的叶子节点，为每个节点提取需求
+支持文本和视觉模型双重提取（图片、表格）
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from loguru import logger
 from pydantic import BaseModel, Field
+import re
+from pathlib import Path
 from app.core.states import SectionState, RequirementItem, PageIndexNode, create_matrix_id
 from app.services.llm_service import get_llm_service
 from app.api.async_tasks import TaskManager
@@ -14,22 +17,25 @@ from app.core.config import settings
 
 def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:
     """
-    PageIndex需求提取节点（单个Worker）
+    PageIndex需求提取节点（单个Worker）- 支持文本和视觉双重提取
     
     输入：
     - state.pageindex_node: PageIndex的一个节点（通常是叶子节点）
+    - state.mineru_output_dir: MinerU输出目录（用于查找图片）
     
     输出：
-    - state.requirements: 提取的需求列表（会被追加到全局State）
+    - state.requirements: 提取的需求列表（文本+视觉，会被追加到全局State）
     
     工作流程：
-    1. 获取节点的summary或text
-    2. 调用LLM提取需求
-    3. 为每个需求生成matrix_id
-    4. 返回需求列表
+    1. 提取文本需求（从original_text）
+    2. 识别Markdown中的图片引用
+    3. 如果有图片，调用视觉模型提取图片需求
+    4. 合并文本需求和视觉需求
+    5. 返回完整需求列表
     """
     node = state.get("pageindex_node")
     task_id = state.get("task_id")
+    mineru_output_dir = state.get("mineru_output_dir")
     
     if not node:
         logger.warning("未找到pageindex_node，跳过")
@@ -49,45 +55,64 @@ def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:
         # 准备节点内容
         content = _prepare_node_content(node)
         
-        # 只要有内容就尝试提取需求，让LLM判断是否包含需求
-        if not content or len(content.strip()) == 0:
-            logger.info(f"节点 {node.title} 无内容，跳过")
-            return {"requirements": []}
+        # ========== 第1步：提取文本需求 ==========
+        text_requirements = []
         
-        logger.info(f"节点 {node.title} 内容长度: {len(content)}字，开始提取需求")
-        
-        # 调用LLM提取需求
-        llm_service = get_llm_service()
-        
-        # 构建提示词
-        prompt = _build_extraction_prompt(node, content)
-        
-        # 定义输出模型
-        class RequirementList(BaseModel):
-            """需求列表"""
-            items: List[RequirementItem] = Field(default_factory=list, description="提取的需求列表")
-        
-        # 调用LLM
-        messages = [
-            {"role": "system", "content": "你是一个专业的招标需求分析专家。"},
-            {"role": "user", "content": prompt}
-        ]
-        
-        result = llm_service.structured_completion(
-            messages=messages,
-            response_model=RequirementList,
-            model=settings.extractor_model,
-            temperature=0.1
-        )
-        
-        requirements = result.items if result else []
-        
-        # 为每个需求生成matrix_id
-        for i, req in enumerate(requirements, 1):
-            if not req.matrix_id or req.matrix_id == "":
-                req.matrix_id = create_matrix_id(node.node_id or "UNKNOWN", i)
+        if content and len(content.strip()) > 0:
+            logger.info(f"节点 {node.title} 内容长度: {len(content)}字，开始提取文本需求")
             
-            # 确保section_id和section_title正确
+            # 调用LLM提取文本需求
+            llm_service = get_llm_service()
+            
+            # 构建提示词
+            prompt = _build_extraction_prompt(node, content)
+            
+            # 定义输出模型
+            class RequirementList(BaseModel):
+                """需求列表"""
+                items: List[RequirementItem] = Field(default_factory=list, description="提取的需求列表")
+            
+            # 调用LLM
+            messages = [
+                {"role": "system", "content": "你是一个专业的招标需求分析专家。"},
+                {"role": "user", "content": prompt}
+            ]
+            
+            result = llm_service.structured_completion(
+                messages=messages,
+                response_model=RequirementList,
+                model=settings.extractor_model,
+                temperature=0.1
+            )
+            
+            text_requirements = result.items if result else []
+            logger.info(f"✓ 从文本中提取到 {len(text_requirements)} 条需求")
+        else:
+            logger.info(f"节点 {node.title} 无文本内容")
+        
+        # ========== 第2步：提取视觉需求（如果有图片） ==========
+        visual_requirements = []
+        
+        if mineru_output_dir and content:
+            # 从Markdown中识别图片
+            image_paths = _extract_image_paths_from_markdown(content, mineru_output_dir)
+            
+            if image_paths:
+                logger.info(f"节点 {node.title} 包含 {len(image_paths)} 张图片")
+                llm_service = get_llm_service()
+                visual_requirements = _extract_requirements_from_images(
+                    image_paths=image_paths,
+                    node=node,
+                    llm_service=llm_service
+                )
+                logger.info(f"✓ 从图片中提取到 {len(visual_requirements)} 条需求")
+        
+        # ========== 第3步：合并需求并重新编号 ==========
+        all_requirements = text_requirements + visual_requirements
+        
+        # 为所有需求重新生成matrix_id（统一编号）
+        for i, req in enumerate(all_requirements, 1):
+            req.matrix_id = create_matrix_id(node.node_id or "UNKNOWN", i)
             req.section_id = node.node_id or "UNKNOWN"
             req.section_title = node.title
             
@@ -95,19 +120,26 @@ def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:
             if req.page_number == 0:
                 req.page_number = node.start_index
         
-        logger.info(f"✓ 节点 {node.title} 提取到 {len(requirements)} 条需求")
+        logger.info(
+            f"✓ 节点 {node.title} 提取完成: "
+            f"文本需求{len(text_requirements)}条 + 视觉需求{len(visual_requirements)}条 = "
+            f"总计{len(all_requirements)}条"
+        )
         
         # 记录详细信息
-        for req in requirements:
-            logger.debug(f"  - {req.matrix_id}: {req.requirement[:50]}...")
+        for req in all_requirements:
+            source_tag = "[图片]" if "[图片内容]" in req.original_text else "[文本]"
+            logger.debug(f"  {source_tag} {req.matrix_id}: {req.requirement[:50]}...")
         
         # 将需求添加到节点本身（构建需求树）
-        node.requirements = requirements
+        node.requirements = all_requirements
         
-        return {"requirements": requirements}
+        return {"requirements": all_requirements}
         
     except Exception as e:
         logger.error(f"节点 {node.title} 提取失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {"requirements": []}
 
 
@@ -293,3 +325,157 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
    category: "QUALIFICATION"
 """
     return prompt
+
+
+def _extract_image_paths_from_markdown(content: str, mineru_output_dir: str) -> List[str]:
+    """
+    从Markdown内容中提取图片路径
+    
+    Args:
+        content: Markdown内容
+        mineru_output_dir: MinerU输出目录
+        
+    Returns:
+        图片文件的绝对路径列表
+    """
+    # Markdown图片格式：![description](path)
+    image_pattern = r'!\[([^\]]*)\]\(([^)]+)\)'
+    matches = re.findall(image_pattern, content)
+    
+    if not matches:
+        return []
+    
+    image_paths = []
+    mineru_dir = Path(mineru_output_dir)
+    
+    for description, rel_path in matches:
+        # rel_path 可能是相对路径，如 "images/image_1.png"
+        # 需要转换为绝对路径
+        abs_path = mineru_dir / rel_path
+        
+        if abs_path.exists():
+            image_paths.append(str(abs_path))
+            logger.debug(f"找到图片: {rel_path} -> {abs_path}")
+        else:
+            logger.warning(f"图片文件不存在: {abs_path}")
+    
+    return image_paths
+
+
+def _extract_requirements_from_images(
+    image_paths: List[str],
+    node: PageIndexNode,
+    llm_service: Any
+) -> List[RequirementItem]:
+    """
+    使用视觉模型从图片中提取需求
+    
+    Args:
+        image_paths: 图片文件路径列表
+        node: 当前节点
+        llm_service: LLM服务实例
+        
+    Returns:
+        从图片中提取的需求列表
+    """
+    if not image_paths:
+        return []
+    
+    logger.info(f"节点 {node.title} 包含 {len(image_paths)} 张图片，使用视觉模型提取需求")
+    
+    try:
+        # 构建视觉提示词
+        prompt = f"""你是招标文件分析专家。请分析以下图片内容，提取其中的招标需求。
+
+## 上下文信息
+- 章节标题：{node.title}
+- 页码范围：{node.start_index}-{node.end_index}
+- 节点ID：{node.node_id or "UNKNOWN"}
+
+## 任务说明
+这些图片来自招标文件的"{node.title}"章节。请仔细分析图片中的内容：
+- 如果是**表格**：提取表格中的技术参数、规格要求、性能指标等
+- 如果是**流程图/架构图**：提取系统架构要求、技术选型要求、部署要求等
+- 如果是**截图/示例**：提取界面要求、功能要求、用户体验要求等
+- 如果是**其他图示**：提取图片传达的关键需求信息
+
+## 提取要求
+1. **准确性**：只提取明确的需求，不要推测或添加图片中没有的内容
+2. **完整性**：不要遗漏图片中的重要需求
+3. **分类**：对每个需求进行类型分类（SOLUTION/QUALIFICATION/BUSINESS/FORMAT/PROCESS/OTHER）
+4. **来源标注**：original_text字段填写"[图片内容]"加上具体描述
+5. **caption填充**：
+   - 如果是图片（架构图/流程图/截图等），填充image_caption字段
+   - 如果是表格，填充table_caption字段
+   - caption应包含图片/表格的完整描述和关键信息
+
+## 需求类型说明
+- **SOLUTION**（技术/服务方案）：功能、性能、架构、技术选型等
+- **QUALIFICATION**（资质）：企业资质、证书、授权、业绩等
+- **BUSINESS**（商务）：报价、付款、合同条款等
+- **FORMAT**（格式）：文件格式、装订、签章等
+- **PROCESS**（流程）：报名、开标、电子标等流程要求
+- **OTHER**（其他）：不确定的需求
+
+## 输出格式
+请以JSON数组格式输出需求列表，每个需求包含：
+- requirement: 需求概述（1-2句话）
+- original_text: "[图片内容] " + 图片中的具体描述
+- page_number: {node.start_index}
+- category: 需求类型（见上述分类）
+- response_suggestion: 应答建议
+- risk_warning: 风险提示（如果没有填"无"）
+- notes: 备注（如果没有填"图片来源"）
+- image_caption: 图片内容完整描述（仅当内容来自普通图片时填写）
+- table_caption: 表格内容完整描述（仅当内容来自表格时填写）
+
+如果图片中没有需求信息，返回空数组[]。
+"""
+        
+        # 调用视觉模型
+        response_text = llm_service.vision_completion(
+            text_prompt=prompt,
+            image_inputs=image_paths,
+            temperature=0.2,
+            max_tokens=4000
+        )
+        
+        # 解析JSON响应
+        import json
+        try:
+            # 尝试提取JSON数组
+            json_match = re.search(r'\[[\s\S]*\]', response_text)
+            if json_match:
+                requirements_data = json.loads(json_match.group())
+            else:
+                logger.warning(f"视觉模型返回的内容不包含JSON数组: {response_text[:200]}")
+                return []
+            
+            # 转换为RequirementItem对象
+            requirements = []
+            for i, req_data in enumerate(requirements_data, 1):
+                # 补充必需字段
+                req_data.setdefault('section_id', node.node_id or "UNKNOWN")
+                req_data.setdefault('section_title', node.title)
+                req_data.setdefault('page_number', node.start_index)
+                req_data.setdefault('matrix_id', create_matrix_id(node.node_id or "UNKNOWN", i))
+                req_data.setdefault('category', 'OTHER')
+                req_data.setdefault('response_suggestion', '请在方案中响应此图片内容')
+                req_data.setdefault('risk_warning', '无')
+                req_data.setdefault('notes', '图片来源')
+                
+                # 创建RequirementItem
+                req = RequirementItem(**req_data)
+                requirements.append(req)
+            
+            logger.info(f"✓ 从图片中提取到 {len(requirements)} 条需求")
+            return requirements
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"解析视觉模型返回的JSON失败: {e}")
+            logger.debug(f"原始返回: {response_text}")
+            return []
+        
+    except Exception as e:
+        logger.error(f"视觉模型提取需求失败: {e}")
+        return []

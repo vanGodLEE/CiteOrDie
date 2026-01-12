@@ -1,8 +1,8 @@
 """
 LangGraph工作流定义
 
-构建基于PageIndex的招标分析工作流：
-pageindex_parser → Map(Enrichers) → Auditor
+构建基于PageIndex+MinerU的招标分析工作流：
+pageindex_parser → mineru_parser → Map(text_fillers) → aggregator → Map(enrichers) → auditor
 """
 
 import time
@@ -16,6 +16,7 @@ from langgraph.types import Send
 
 from app.core.states import TenderAnalysisState, SectionState, PageIndexNode
 from app.nodes.pageindex_parser import pageindex_parser_node
+from app.nodes.mineru_parser import mineru_parser_node
 from app.nodes.text_filler import text_filler_node
 from app.nodes.pageindex_enricher import pageindex_enricher_node
 from app.nodes.auditor import auditor_node
@@ -25,15 +26,16 @@ def create_tender_analysis_graph():
     """
     创建招标分析工作流图
     
-    工作流拓扑（修复版）：
-    START → pageindex_parser → [text_fillers并行] → aggregator → [enrichers并行] → auditor → END
+    工作流拓扑（MinerU增强版）：
+    START → pageindex_parser → mineru_parser → [text_fillers并行] → aggregator → [enrichers并行] → auditor → END
     
     关键点：
     1. pageindex_parser: 调用PageIndex解析PDF，生成文档树结构
-    2. text_fillers (并行): 为每个节点并行填充精确原文
-    3. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
-    4. enrichers (并行): 为每个叶子节点并行提取需求（基于标题+原文）
-    5. auditor: 汇总所有需求，生成最终矩阵
+    2. mineru_parser: 调用MinerU完整解析PDF，获取图片、表格等完整内容
+    3. text_fillers (并行): 基于MinerU的content_list为每个节点并行填充精确原文
+    4. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
+    5. enrichers (并行): 为每个叶子节点并行提取需求（文本+视觉模型）
+    6. auditor: 汇总所有需求，生成最终矩阵
     
     性能优化：
     - text_fillers并行执行，大幅提升原文填充速度
@@ -46,6 +48,7 @@ def create_tender_analysis_graph():
     
     # 添加节点
     workflow.add_node("pageindex_parser", pageindex_parser_node)
+    workflow.add_node("mineru_parser", mineru_parser_node)  # 新增：MinerU解析节点
     workflow.add_node("text_filler", text_filler_node)  # 单个节点的填充
     workflow.add_node("aggregator", aggregator_node)  # 汇聚节点（必须！）
     workflow.add_node("enricher", pageindex_enricher_node)
@@ -53,9 +56,10 @@ def create_tender_analysis_graph():
     
     # 连接边
     workflow.add_edge(START, "pageindex_parser")
+    workflow.add_edge("pageindex_parser", "mineru_parser")  # PageIndex → MinerU
     
     # 动态Map1：为每个节点创建一个Send到text_filler（并行填充原文）
-    workflow.add_conditional_edges("pageindex_parser", route_to_text_fillers)
+    workflow.add_conditional_edges("mineru_parser", route_to_text_fillers)  # MinerU → text_fillers
     
     # 所有text_filler完成后，汇聚到aggregator（避免重复）
     workflow.add_edge("text_filler", "aggregator")
@@ -69,7 +73,7 @@ def create_tender_analysis_graph():
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（修复重复执行Bug）")
+    logger.info("招标分析工作流图构建完成（PageIndex+MinerU增强版）")
     
     return graph
 
@@ -103,15 +107,21 @@ def route_to_text_fillers(state: TenderAnalysisState):
     
     logger.info(f"准备并行填充 {len(all_nodes)} 个节点的原文")
     
+    # 获取MinerU解析结果
+    mineru_content_list = state.get("mineru_content_list", [])
+    mineru_output_dir = state.get("mineru_output_dir")
+    
     # 为每个节点创建一个Send
     sends = []
     for node in all_nodes:
-        # 创建TextFiller任务状态
+        # 创建TextFiller任务状态（必须传递MinerU数据！）
         filler_state = {
             "node": node,
             "pdf_path": pdf_path,
             "task_id": task_id,
-            "pageindex_document": pageindex_doc  # 传递完整文档用于计算兄弟节点
+            "pageindex_document": pageindex_doc,  # 传递完整文档用于计算兄弟节点
+            "mineru_content_list": mineru_content_list,  # 传递MinerU内容列表
+            "mineru_output_dir": mineru_output_dir  # 传递MinerU输出目录
         }
         
         sends.append(Send("text_filler", filler_state))
@@ -194,6 +204,7 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
     """
     pageindex_doc = state.get("pageindex_document")
     task_id = state.get("task_id")
+    mineru_output_dir = state.get("mineru_output_dir")  # 获取MinerU输出目录
     
     if not pageindex_doc:
         logger.warning("未找到pageindex_document，无法路由到enrichers")
@@ -206,7 +217,11 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
         logger.warning("未找到叶子节点，无法路由到enrichers")
         return []
     
-    logger.info(f"准备并行提取 {len(leaf_nodes)} 个叶子节点的需求")
+    logger.info(f"准备并行提取 {len(leaf_nodes)} 个叶子节点的需求（文本+视觉）")
+    if mineru_output_dir:
+        logger.info(f"  MinerU输出目录: {mineru_output_dir}")
+    else:
+        logger.warning("  未找到MinerU输出目录，将跳过视觉提取")
     
     # 为每个叶子节点创建一个Send
     sends = []
@@ -216,6 +231,7 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
         section_state = SectionState(
             pageindex_node=node,
             task_id=task_id,
+            mineru_output_dir=mineru_output_dir,  # 传递MinerU输出目录
             section_node=None,
             content_blocks=None,
             section_id=node.node_id,
@@ -253,6 +269,9 @@ def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
         "use_mock": False,
         "task_id": task_id,
         "pageindex_document": None,
+        "mineru_result": None,  # 新增：MinerU解析结果
+        "mineru_content_list": [],  # 新增：MinerU内容列表
+        "mineru_output_dir": None,  # 新增：MinerU输出目录
         "content_list": [],
         "markdown": "",
         "toc": [],

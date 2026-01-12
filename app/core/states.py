@@ -18,20 +18,25 @@ import operator
 
 class RequirementItem(BaseModel):
     """
-    需求条款模型
+    需求条款模型（增强版 - 支持视觉内容）
     
-    9个字段：
+    核心字段（9个基础字段）：
     1. 需求ID - 自动生成
     2. 需求 - 提取的需求内容
     3. 原文 - 对应原文
     4. 章节 - 对应的章节
     5. 页码 - 对应的页码
-    6. 类型 - 需求类型分类（新增）
+    6. 类型 - 需求类型分类
     7. 应答方向 - AI生成的建议
     8. 风险提示 - AI生成的风险提示
     9. 备注 - AI生成的备注
+    
+    视觉扩展字段（2个新增字段）：
+    10. image_caption - 图片分析描述
+    11. table_caption - 表格分析描述
     """
     
+    # 核心字段
     matrix_id: str = Field(..., description="需求唯一ID，格式：{section_id}-REQ-{序号}")
     requirement: str = Field(..., description="提取的需求内容，简明扼要")
     original_text: str = Field(..., description="需求原文，必须是精确摘录")
@@ -45,6 +50,16 @@ class RequirementItem(BaseModel):
     response_suggestion: str = Field(..., description="应答方向建议")
     risk_warning: str = Field(..., description="风险提示")
     notes: str = Field(..., description="备注")
+    
+    # 视觉扩展字段（新增）
+    image_caption: Optional[str] = Field(
+        None,
+        description="图片内容描述（如果需求来自图片，则包含视觉模型的分析结果）"
+    )
+    table_caption: Optional[str] = Field(
+        None,
+        description="表格内容描述（如果需求来自表格，则包含表格结构化数据）"
+    )
 
 
 # ============================================================================
@@ -61,7 +76,8 @@ class PageIndexNode(BaseModel):
     """
     # PageIndex原始字段
     node_id: Optional[str] = Field(None, description="PageIndex生成的节点ID，如 '0001', '0002'")
-    title: str = Field(..., description="章节标题")
+    structure: Optional[str] = Field(None, description="章节序号，如 '2.1', '2.1.1'（用于匹配）")
+    title: str = Field(..., description="章节标题（不含序号）")
     start_index: int = Field(..., description="起始页码（1-based）")
     end_index: int = Field(..., description="结束页码（1-based）")
     summary: Optional[str] = Field(None, description="PageIndex生成的节点摘要（页级别，仅供参考）")
@@ -72,6 +88,12 @@ class PageIndexNode(BaseModel):
     
     # **新增：精确原文字段**
     original_text: Optional[str] = Field(None, description="精确提取的原文内容（行级别，用于需求提取）")
+    
+    # **新增：bbox坐标字段**
+    positions: List[List[int]] = Field(
+        default_factory=list,
+        description="原文内容的bbox坐标列表，格式：[[page_idx, x1, y1, x2, y2], ...]"
+    )
     
     # **关键扩展：需求字段**
     requirements: List[RequirementItem] = Field(default_factory=list, description="该节点的需求列表")
@@ -153,11 +175,13 @@ class TenderAnalysisState(TypedDict):
     """
     全局状态 - LangGraph工作流的核心状态
     
-    数据流（基于PageIndex）：
+    数据流（基于PageIndex + MinerU）：
     1. 输入: pdf_path
     2. PageIndex Parser: 解析生成 pageindex_document（包含树结构）
-    3. Enricher (并行): 遍历叶子节点，为每个节点提取需求，填充requirements字段
-    4. Auditor: 收集所有节点的需求，生成 final_matrix
+    3. MinerU Parser: 完整解析PDF，生成 mineru_content_list（包含图片、表格）
+    4. Text Filler (并行): 基于content_list为每个节点填充original_text
+    5. Enricher (并行): 遍历叶子节点，提取需求（文本+视觉）
+    6. Auditor: 收集所有节点的需求，生成 final_matrix
     """
     # 输入
     pdf_path: str
@@ -166,6 +190,11 @@ class TenderAnalysisState(TypedDict):
     
     # PageIndex解析结果
     pageindex_document: Optional[PageIndexDocument]  # PageIndex生成的需求树文档
+    
+    # MinerU解析结果（新增）
+    mineru_result: Optional[Dict[str, Any]]  # MinerU完整解析结果
+    mineru_content_list: List[Dict[str, Any]]  # MinerU内容列表（包含图片、表格）
+    mineru_output_dir: Optional[str]  # MinerU输出目录路径
     
     # 兼容字段（保留以避免破坏现有代码）
     content_list: List[Dict[str, Any]]
@@ -193,9 +222,11 @@ class SectionState(TypedDict):
     每个Enricher Worker收到一个SectionState，包含：
     - pageindex_node: PageIndex的节点（叶子节点）
     - task_id: 任务ID，用于进度更新
+    - mineru_output_dir: MinerU输出目录（用于视觉模型访问图片）
     """
     pageindex_node: Optional[PageIndexNode]  # PageIndex的节点（叶子节点）
     task_id: Optional[str]  # 任务ID，用于进度更新
+    mineru_output_dir: Optional[str]  # MinerU输出目录（用于视觉模型访问图片）
     
     # 兼容字段
     section_node: Optional[Any]

@@ -143,9 +143,10 @@ class Section(Base):
 
 class Requirement(Base):
     """
-    需求表
+    需求表（增强版 - 支持视觉内容）
     
     存储提取的需求矩阵，支持后续查询和复用
+    包含图片和表格的分析描述
     """
     __tablename__ = "requirements"
     
@@ -161,13 +162,17 @@ class Requirement(Base):
     section_title = Column(String(500), comment="章节标题")
     page_number = Column(Integer, comment="页码")
     
-    # 需求内容（9字段模型）
+    # 需求内容（核心9字段）
     requirement = Column(Text, nullable=False, comment="需求内容")
     original_text = Column(Text, nullable=False, comment="原文")
     category = Column(String(20), default="OTHER", comment="需求类型：SOLUTION/QUALIFICATION/BUSINESS/FORMAT/PROCESS/OTHER")
     response_suggestion = Column(Text, comment="应答方向")
     risk_warning = Column(Text, comment="风险提示")
     notes = Column(Text, comment="备注")
+    
+    # 视觉扩展字段（新增2个字段）
+    image_caption = Column(Text, comment="图片内容描述（视觉模型分析结果）")
+    table_caption = Column(Text, comment="表格内容描述（表格结构化数据）")
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
