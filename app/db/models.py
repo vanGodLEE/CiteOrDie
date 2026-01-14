@@ -125,6 +125,9 @@ class Section(Base):
     end_page = Column(Integer, comment="结束页码")
     start_index = Column(Integer, comment="在content_list中的起始索引")
     
+    # ✅ 新增：位置信息（JSON格式存储bbox坐标列表）
+    positions_json = Column(Text, comment="bbox坐标列表（JSON格式）：[[page, x1, y1, x2, y2], ...]")
+    
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     
@@ -143,10 +146,10 @@ class Section(Base):
 
 class Requirement(Base):
     """
-    需求表（增强版 - 支持视觉内容）
+    需求表（增强版 - 支持视觉内容和位置信息）
     
     存储提取的需求矩阵，支持后续查询和复用
-    包含图片和表格的分析描述
+    包含图片和表格的分析描述，以及PDF标注所需的bbox坐标
     """
     __tablename__ = "requirements"
     
@@ -170,9 +173,12 @@ class Requirement(Base):
     risk_warning = Column(Text, comment="风险提示")
     notes = Column(Text, comment="备注")
     
-    # 视觉扩展字段（新增2个字段）
+    # 视觉扩展字段（2个字段）
     image_caption = Column(Text, comment="图片内容描述（视觉模型分析结果）")
     table_caption = Column(Text, comment="表格内容描述（表格结构化数据）")
+    
+    # ✅ 新增：位置信息（JSON格式存储bbox坐标列表）
+    positions_json = Column(Text, comment="bbox坐标列表（JSON格式）：[[page, x1, y1, x2, y2], ...]，用于PDF标注")
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")

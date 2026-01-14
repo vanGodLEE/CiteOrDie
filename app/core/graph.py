@@ -2,7 +2,7 @@
 LangGraph工作流定义
 
 构建基于PageIndex+MinerU的招标分析工作流：
-pageindex_parser → mineru_parser → Map(text_fillers) → aggregator → Map(enrichers) → auditor
+pageindex_parser → mineru_parser → Map(text_fillers) → aggregator → Map(enrichers) → auditor → requirement_locator
 """
 
 import time
@@ -20,14 +20,16 @@ from app.nodes.mineru_parser import mineru_parser_node
 from app.nodes.text_filler import text_filler_node
 from app.nodes.pageindex_enricher import pageindex_enricher_node
 from app.nodes.auditor import auditor_node
+from app.nodes.requirement_locator import requirement_locator_node
 
 
 def create_tender_analysis_graph():
     """
     创建招标分析工作流图
     
-    工作流拓扑（MinerU增强版）：
-    START → pageindex_parser → mineru_parser → [text_fillers并行] → aggregator → [enrichers并行] → auditor → END
+    工作流拓扑（完整版）：
+    START → pageindex_parser → mineru_parser → [text_fillers并行] → aggregator
+          → [enrichers并行] → auditor → requirement_locator → END
     
     关键点：
     1. pageindex_parser: 调用PageIndex解析PDF，生成文档树结构
@@ -36,6 +38,7 @@ def create_tender_analysis_graph():
     4. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
     5. enrichers (并行): 为每个叶子节点并行提取需求（文本+视觉模型）
     6. auditor: 汇总所有需求，生成最终矩阵
+    7. requirement_locator: 为每个需求定位positions（图片/表格→节点positions，文本→智能匹配）
     
     性能优化：
     - text_fillers并行执行，大幅提升原文填充速度
@@ -48,18 +51,19 @@ def create_tender_analysis_graph():
     
     # 添加节点
     workflow.add_node("pageindex_parser", pageindex_parser_node)
-    workflow.add_node("mineru_parser", mineru_parser_node)  # 新增：MinerU解析节点
-    workflow.add_node("text_filler", text_filler_node)  # 单个节点的填充
-    workflow.add_node("aggregator", aggregator_node)  # 汇聚节点（必须！）
+    workflow.add_node("mineru_parser", mineru_parser_node)
+    workflow.add_node("text_filler", text_filler_node)
+    workflow.add_node("aggregator", aggregator_node)
     workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
+    workflow.add_node("requirement_locator", requirement_locator_node)  # 新增：需求位置定位
     
     # 连接边
     workflow.add_edge(START, "pageindex_parser")
-    workflow.add_edge("pageindex_parser", "mineru_parser")  # PageIndex → MinerU
+    workflow.add_edge("pageindex_parser", "mineru_parser")
     
     # 动态Map1：为每个节点创建一个Send到text_filler（并行填充原文）
-    workflow.add_conditional_edges("mineru_parser", route_to_text_fillers)  # MinerU → text_fillers
+    workflow.add_conditional_edges("mineru_parser", route_to_text_fillers)
     
     # 所有text_filler完成后，汇聚到aggregator（避免重复）
     workflow.add_edge("text_filler", "aggregator")
@@ -69,11 +73,16 @@ def create_tender_analysis_graph():
     
     # 所有enricher完成后，汇总到auditor
     workflow.add_edge("enricher", "auditor")
-    workflow.add_edge("auditor", END)
+    
+    # auditor完成后，进行需求位置定位
+    workflow.add_edge("auditor", "requirement_locator")
+    
+    # requirement_locator完成后，结束
+    workflow.add_edge("requirement_locator", END)
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（PageIndex+MinerU增强版）")
+    logger.info("招标分析工作流图构建完成（完整版：PageIndex+MinerU+需求定位）")
     
     return graph
 

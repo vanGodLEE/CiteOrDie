@@ -187,9 +187,16 @@ class SectionRepository:
         task_id: str,
         sections_data: List[Dict[str, Any]]
     ) -> List[Section]:
-        """批量创建章节"""
+        """批量创建章节（支持positions）"""
+        import json
         sections = []
         for data in sections_data:
+            # ✅ 处理positions：如果是list，转为JSON字符串
+            positions = data.get("positions")
+            positions_json = None
+            if positions and isinstance(positions, list):
+                positions_json = json.dumps(positions)
+            
             section = Section(
                 task_id=task_id,
                 section_id=data.get("section_id"),
@@ -199,13 +206,14 @@ class SectionRepository:
                 start_page=data.get("start_page"),
                 end_page=data.get("end_page"),
                 start_index=data.get("start_index"),
+                positions_json=positions_json,  # ✅ 保存positions
                 created_at=datetime.now()
             )
             sections.append(section)
         
         db.add_all(sections)
         db.commit()
-        logger.info(f"数据库：保存 {len(sections)} 个章节")
+        logger.info(f"数据库：保存 {len(sections)} 个章节（含positions）")
         return sections
     
     @staticmethod
@@ -225,9 +233,16 @@ class RequirementRepository:
         task_id: str,
         requirements_data: List[Dict[str, Any]]
     ) -> List[Requirement]:
-        """批量创建需求"""
+        """批量创建需求（支持positions）"""
+        import json
         requirements = []
         for data in requirements_data:
+            # ✅ 处理positions：如果是list，转为JSON字符串
+            positions = data.get("positions")
+            positions_json = None
+            if positions and isinstance(positions, list):
+                positions_json = json.dumps(positions)
+            
             req = Requirement(
                 task_id=task_id,
                 matrix_id=data.get("matrix_id"),
@@ -236,25 +251,66 @@ class RequirementRepository:
                 page_number=data.get("page_number"),
                 requirement=data.get("requirement"),
                 original_text=data.get("original_text"),
-                category=data.get("category", "OTHER"),  # 新增：需求类型
+                category=data.get("category", "OTHER"),
                 response_suggestion=data.get("response_suggestion"),
                 risk_warning=data.get("risk_warning"),
                 notes=data.get("notes"),
+                positions_json=positions_json,  # ✅ 保存positions
                 created_at=datetime.now()
             )
             requirements.append(req)
         
         db.add_all(requirements)
         db.commit()
-        logger.info(f"数据库：保存 {len(requirements)} 条需求")
+        logger.info(f"数据库：保存 {len(requirements)} 条需求（含positions）")
         return requirements
     
     @staticmethod
     def get_requirements(db: Session, task_id: str) -> List[Requirement]:
-        """获取任务的所有需求"""
+        """获取任务的所有需求（按文档顺序排列）"""
         return db.query(Requirement).filter(
             Requirement.task_id == task_id
         ).order_by(Requirement.page_number, Requirement.id).all()
+    
+    @staticmethod
+    def get_requirements_with_positions(db: Session, task_id: str) -> List[Dict[str, Any]]:
+        """
+        获取任务的所有需求（含positions，解析为字典）
+        
+        返回字典列表，positions字段已从JSON解析为Python list
+        """
+        import json
+        requirements = RequirementRepository.get_requirements(db, task_id)
+        
+        result = []
+        for req in requirements:
+            req_dict = {
+                "id": req.id,
+                "matrix_id": req.matrix_id,
+                "section_id": req.section_id,
+                "section_title": req.section_title,
+                "page_number": req.page_number,
+                "requirement": req.requirement,
+                "original_text": req.original_text,
+                "category": req.category,
+                "response_suggestion": req.response_suggestion,
+                "risk_warning": req.risk_warning,
+                "notes": req.notes,
+                "image_caption": req.image_caption,
+                "table_caption": req.table_caption,
+                "positions": []  # 默认空列表
+            }
+            
+            # ✅ 解析positions_json
+            if req.positions_json:
+                try:
+                    req_dict["positions"] = json.loads(req.positions_json)
+                except json.JSONDecodeError:
+                    logger.warning(f"需求 {req.matrix_id} 的positions_json解析失败")
+            
+            result.append(req_dict)
+        
+        return result
     
     @staticmethod
     def search_requirements(

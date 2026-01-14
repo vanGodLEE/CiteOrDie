@@ -18,7 +18,7 @@ import operator
 
 class RequirementItem(BaseModel):
     """
-    需求条款模型（增强版 - 支持视觉内容）
+    需求条款模型（增强版 - 支持视觉内容和位置定位）
     
     核心字段（9个基础字段）：
     1. 需求ID - 自动生成
@@ -31,9 +31,13 @@ class RequirementItem(BaseModel):
     8. 风险提示 - AI生成的风险提示
     9. 备注 - AI生成的备注
     
-    视觉扩展字段（2个新增字段）：
+    视觉扩展字段（3个字段）：
     10. image_caption - 图片分析描述
     11. table_caption - 表格分析描述
+    12. img_path - 图片/表格的文件路径（用于精确定位）
+    
+    位置定位字段（1个字段）：
+    13. positions - 需求原文在PDF中的bbox坐标
     """
     
     # 核心字段
@@ -51,7 +55,7 @@ class RequirementItem(BaseModel):
     risk_warning: str = Field(..., description="风险提示")
     notes: str = Field(..., description="备注")
     
-    # 视觉扩展字段（新增）
+    # 视觉扩展字段
     image_caption: Optional[str] = Field(
         None,
         description="图片内容描述（如果需求来自图片，则包含视觉模型的分析结果）"
@@ -59,6 +63,16 @@ class RequirementItem(BaseModel):
     table_caption: Optional[str] = Field(
         None,
         description="表格内容描述（如果需求来自表格，则包含表格结构化数据）"
+    )
+    img_path: Optional[str] = Field(
+        None,
+        description="图片/表格的相对路径（如 'images/xxx.jpg'），用于精确定位content_list中的对应项"
+    )
+    
+    # 位置定位字段
+    positions: List[List[int]] = Field(
+        default_factory=list,
+        description="需求对应原文的bbox坐标列表，格式：[[page_idx, x1, y1, x2, y2], ...]（MinerU 0-based索引）"
     )
 
 

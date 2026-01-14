@@ -77,11 +77,12 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         
         # 保存到数据库
         from app.db.repositories import (
-            TaskRepository, 
-            SectionRepository, 
+            TaskRepository,
+            SectionRepository,
             RequirementRepository
         )
         from app.db.database import SessionLocal
+        from app.utils.mineru_coordinate_converter import convert_positions_for_frontend
         
         db = SessionLocal()
         try:
@@ -99,22 +100,33 @@ async def run_analysis_task(task_id: str, pdf_path: str):
                 ]
                 SectionRepository.batch_create_sections(db, task_id, sections_data)
             
+            # ✅ 转换MinerU坐标为页面坐标（左上原点，单位points，前端直接乘以scale使用）
             # 批量保存需求矩阵
-            requirements_data = [
-                {
+            requirements_data = []
+            for req in final_matrix:
+                # 转换positions坐标
+                positions = req.positions if hasattr(req, 'positions') else []
+                if positions:
+                    try:
+                        positions = convert_positions_for_frontend(positions, pdf_path)
+                        logger.debug(f"需求 {req.matrix_id} 坐标已转换为页面坐标（左上原点，单位points）")
+                    except Exception as e:
+                        logger.warning(f"转换需求 {req.matrix_id} 坐标失败: {e}，保留原始坐标")
+                
+                requirements_data.append({
                     "matrix_id": req.matrix_id,
                     "requirement": req.requirement,
                     "original_text": req.original_text,
                     "section_id": req.section_id,
                     "section_title": req.section_title,
                     "page_number": req.page_number,
-                    "category": req.category if hasattr(req, 'category') else "OTHER",  # 新增：需求类型
+                    "category": req.category if hasattr(req, 'category') else "OTHER",
                     "response_suggestion": req.response_suggestion,
                     "risk_warning": req.risk_warning,
-                    "notes": req.notes
-                }
-                for req in final_matrix
-            ]
+                    "notes": req.notes,
+                    "positions": positions  # ✅ 已转换为PDF坐标
+                })
+            
             RequirementRepository.batch_create_requirements(db, task_id, requirements_data)
             
         finally:
@@ -124,6 +136,30 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         tree_data = None
         if pageindex_doc:
             tree_data = pageindex_doc.model_dump()
+            
+            # ✅ 转换document_tree中所有节点的positions
+            def convert_tree_positions(node_data: dict):
+                """递归转换树节点的positions"""
+                if node_data.get("positions"):
+                    try:
+                        node_data["positions"] = convert_positions_for_frontend(
+                            node_data["positions"], 
+                            pdf_path
+                        )
+                    except Exception as e:
+                        logger.warning(f"转换节点 {node_data.get('title')} 的positions失败: {e}")
+                
+                # 递归处理子节点
+                if node_data.get("nodes"):
+                    for child in node_data["nodes"]:
+                        convert_tree_positions(child)
+            
+            # 转换根节点和所有子节点
+            if tree_data.get("structure"):
+                for root_node in tree_data["structure"]:
+                    convert_tree_positions(root_node)
+                
+                logger.info("✅ document_tree中所有节点的positions已转换为页面坐标")
         
         # 更新任务状态为完成（包括document_tree持久化到数据库）
         TaskManager.update_task(
@@ -280,6 +316,12 @@ async def get_task_info(task_id: str):
     获取任务信息（包括最终需求矩阵和文档树）
     
     重要：无论任务是从内存还是数据库恢复，都能正确返回完整数据
+    
+    ✅ positions已转换为页面坐标（左上角原点，单位points），前端需乘以scale后使用
+    具体使用方法：
+    1. 计算scale: scale = containerWidth / viewport.width
+    2. 应用scale到坐标: vx = x * scale, vy = y * scale
+    3. 绘制高亮: ctx.strokeRect(vx0, vy0, vx1-vx0, vy1-vy0)
     """
     task = TaskManager.get_task(task_id)
     
@@ -297,23 +339,25 @@ async def get_task_info(task_id: str):
         
         db = SessionLocal()
         try:
-            # 1. 读取需求矩阵
-            requirements = RequirementRepository.get_requirements(db, task_id)
+            # 1. 读取需求矩阵（✅ 包含已转换的PDF坐标）
+            requirements_data = RequirementRepository.get_requirements_with_positions(db, task_id)
+            task_record = TaskRepository.get_task(db, task_id)
             
-            # 转换为字典格式
+            # positions已在保存时转换为PDF坐标，直接使用
             matrix = []
-            for req in requirements:
+            for req in requirements_data:
                 matrix.append({
-                    "matrix_id": req.matrix_id,
-                    "requirement": req.requirement,
-                    "original_text": req.original_text,
-                    "section_id": req.section_id,
-                    "section_title": req.section_title,
-                    "page_number": req.page_number,
-                    "category": req.category or "OTHER",  # 新增：需求类型
-                    "response_suggestion": req.response_suggestion,
-                    "risk_warning": req.risk_warning,
-                    "notes": req.notes
+                    "matrix_id": req["matrix_id"],
+                    "requirement": req["requirement"],
+                    "original_text": req["original_text"],
+                    "section_id": req["section_id"],
+                    "section_title": req["section_title"],
+                    "page_number": req["page_number"],
+                    "category": req["category"] or "OTHER",
+                    "response_suggestion": req["response_suggestion"],
+                    "risk_warning": req["risk_warning"],
+                    "notes": req["notes"],
+                    "positions": req["positions"]  # ✅ 已转换为PDF坐标
                 })
             
             # 总是设置matrix和requirements_count
@@ -329,19 +373,27 @@ async def get_task_info(task_id: str):
             
             # 如果内存没有，从数据库读取
             if not document_tree:
-                task_record = TaskRepository.get_task(db, task_id)
                 if task_record and task_record.document_tree_json:
                     try:
                         document_tree = json.loads(task_record.document_tree_json)
                     except Exception as e:
                         logger.error(f"解析document_tree失败: {e}")
             
+            # ✅ document_tree中的positions已在保存时转换（左上原点，单位points）
             task["document_tree"] = document_tree
+            
+            logger.info(f"任务 {task_id}: 返回 {len(matrix)} 条需求")
                 
         finally:
             db.close()
     
     return task
+
+
+# ✅ 坐标转换已在保存时完成：
+#    - 需求的positions：MinerU归一化坐标(0-1000) → 页面坐标(左上原点，单位points)
+#    - 节点的positions：MinerU归一化坐标(0-1000) → 页面坐标(左上原点，单位points)
+# 前端Canvas可直接使用，只需应用scale：vx = x * scale, vy = y * scale
 
 
 @router.get("/download/excel/{task_id}")
@@ -430,20 +482,22 @@ async def get_pdf_url(task_id: str):
         try:
             from app.services.minio_service import get_minio_service
             minio_service = get_minio_service()
-            minio_url = minio_service.get_pdf_url(task_id)
+            # ✅ 修复：正确解包元组返回值
+            direct_url, proxy_url = minio_service.get_pdf_url(task_id)
             
-            if not minio_url:
+            if not direct_url:
                 raise HTTPException(status_code=404, detail="未找到PDF文件")
             
-            logger.debug(f"生成预签名URL成功: {minio_url[:100]}...")
+            logger.debug(f"生成预签名URL成功 (直接): {direct_url[:100]}...")
+            logger.debug(f"生成预签名URL成功 (代理): {proxy_url[:100]}...")
             
             return {
                 "status": "success",
                 "task_id": task_id,
                 "file_name": task_record.file_name,
-                "minio_url": minio_url,
-                "message": "PDF文件URL获取成功（24小时有效）",
-                "url_for_frontend": rewrite_minio_url_for_frontend(minio_url)
+                "minio_url": direct_url,  # 直接访问URL（内网）
+                "proxy_url": proxy_url,    # Nginx代理URL（前端使用）
+                "message": "PDF文件URL获取成功（24小时有效）"
             }
             
         except Exception as e:

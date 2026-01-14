@@ -4,7 +4,7 @@
 提供历史任务、日志、需求的查询接口
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
@@ -79,6 +79,23 @@ class RequirementItem(BaseModel):
     response_suggestion: str
     risk_warning: str
     notes: str
+
+
+class RequirementDetail(BaseModel):
+    """需求详情（包含节点ID和完整信息）"""
+    matrix_id: str
+    node_id: str  # 所在节点的ID（即section_id）
+    section_title: str
+    requirement: str
+    original_text: str
+    page_number: int
+    category: str
+    response_suggestion: str
+    risk_warning: str
+    notes: str
+    image_caption: Optional[str] = None
+    table_caption: Optional[str] = None
+    positions: List[List[Union[int, float]]] = []  # ✅ PDF坐标 [[page_idx(int), x0(float), y0(float), x1(float), y1(float)], ...]
 
 
 # ============================================================================
@@ -211,6 +228,69 @@ def get_task_requirements(task_id: str):
             )
             for req in requirements
         ]
+    finally:
+        db.close()
+
+
+@router.get("/tasks/{task_id}/requirements/all", response_model=List[RequirementDetail])
+def get_all_requirements_flat(task_id: str):
+    """
+    获取任务的所有需求（扁平列表，按文档顺序）
+    
+    返回所有节点的需求，按页码从上到下排序，每个需求包含：
+    - matrix_id: 需求唯一标识
+    - node_id: 所在节点的ID（用于前端定位）
+    - section_title: 章节标题
+    - requirement: 需求概述
+    - original_text: 原文
+    - page_number: 页码
+    - category: 需求类型
+    - response_suggestion: 应答建议
+    - risk_warning: 风险提示
+    - notes: 备注
+    - image_caption: 图片描述（如果有）
+    - table_caption: 表格描述（如果有）
+    - positions: bbox坐标列表（页面坐标，左上角原点，单位points，前端需乘以scale后使用）
+    
+    适用于前端展示完整的需求列表和PDF标注
+    
+    重要：positions已在后端转换为实际页面坐标（左上原点），前端使用时只需：
+    1. 计算scale: scale = containerWidth / viewport.width
+    2. 应用scale: vx = x * scale, vy = y * scale
+    3. 绘制高亮框: ctx.strokeRect(vx0, vy0, vx1-vx0, vy1-vy0)
+    """
+    db = get_db_session()
+    try:
+        # 验证任务是否存在
+        task = TaskRepository.get_task(db, task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        
+        # ✅ 使用新方法：直接获取带positions的需求（已解析JSON）
+        requirements_data = RequirementRepository.get_requirements_with_positions(db, task_id)
+        
+        # positions已在保存时转换为页面坐标（左上角原点，单位points）
+        result = []
+        for req in requirements_data:
+            result.append(RequirementDetail(
+                matrix_id=req["matrix_id"],
+                node_id=req["section_id"] or "UNKNOWN",
+                section_title=req["section_title"] or "",
+                requirement=req["requirement"],
+                original_text=req["original_text"],
+                page_number=req["page_number"] or 0,
+                category=req["category"] or "OTHER",
+                response_suggestion=req["response_suggestion"] or "",
+                risk_warning=req["risk_warning"] or "",
+                notes=req["notes"] or "",
+                image_caption=req["image_caption"],
+                table_caption=req["table_caption"],
+                positions=req["positions"]  # ✅ 已转换为页面坐标（左上原点，单位points，前端直接乘以scale使用）
+            ))
+        
+        logger.info(f"返回任务 {task_id} 的 {len(result)} 条需求（扁平列表）")
+        return result
+        
     finally:
         db.close()
 

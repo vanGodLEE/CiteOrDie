@@ -327,16 +327,17 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
     return prompt
 
 
-def _extract_image_paths_from_markdown(content: str, mineru_output_dir: str) -> List[str]:
+def _extract_image_paths_from_markdown(content: str, mineru_output_dir: str) -> List[Tuple[str, str]]:
     """
-    从Markdown内容中提取图片路径
+    从Markdown内容中提取图片路径（返回元组：绝对路径和相对路径）
     
     Args:
         content: Markdown内容
         mineru_output_dir: MinerU输出目录
         
     Returns:
-        图片文件的绝对路径列表
+        图片路径元组列表：[(绝对路径, 相对路径), ...]
+        相对路径用于存储到img_path字段，绝对路径用于视觉模型调用
     """
     # Markdown图片格式：![description](path)
     image_pattern = r'!\[([^\]]*)\]\(([^)]+)\)'
@@ -345,7 +346,7 @@ def _extract_image_paths_from_markdown(content: str, mineru_output_dir: str) -> 
     if not matches:
         return []
     
-    image_paths = []
+    image_path_tuples = []
     mineru_dir = Path(mineru_output_dir)
     
     for description, rel_path in matches:
@@ -354,46 +355,53 @@ def _extract_image_paths_from_markdown(content: str, mineru_output_dir: str) -> 
         abs_path = mineru_dir / rel_path
         
         if abs_path.exists():
-            image_paths.append(str(abs_path))
+            image_path_tuples.append((str(abs_path), rel_path))
             logger.debug(f"找到图片: {rel_path} -> {abs_path}")
         else:
             logger.warning(f"图片文件不存在: {abs_path}")
     
-    return image_paths
+    return image_path_tuples
 
 
 def _extract_requirements_from_images(
-    image_paths: List[str],
+    image_paths: List[Tuple[str, str]],
     node: PageIndexNode,
     llm_service: Any
 ) -> List[RequirementItem]:
     """
-    使用视觉模型从图片中提取需求
+    ✅ 优化：逐张图片调用视觉模型提取需求
     
     Args:
-        image_paths: 图片文件路径列表
-        node: 当前节点
+        image_paths: 图片路径元组列表 [(绝对路径, 相对路径), ...]
+        node: 节点对象
         llm_service: LLM服务实例
         
     Returns:
-        从图片中提取的需求列表
+        从所有图片中提取的需求列表（每个需求都精确填充img_path）
     """
     if not image_paths:
         return []
     
-    logger.info(f"节点 {node.title} 包含 {len(image_paths)} 张图片，使用视觉模型提取需求")
+    logger.info(f"节点 {node.title} 包含 {len(image_paths)} 张图片，逐张提取需求")
     
-    try:
-        # 构建视觉提示词
-        prompt = f"""你是招标文件分析专家。请分析以下图片内容，提取其中的招标需求。
+    all_requirements = []
+    
+    # ✅ 关键改进：逐张图片处理，而不是批量处理
+    for idx, (abs_path, rel_path) in enumerate(image_paths, 1):
+        logger.info(f"  处理第 {idx}/{len(image_paths)} 张图片: {rel_path}")
+        
+        try:
+            # 构建单张图片的提示词
+            prompt = f"""你是招标文件分析专家。请分析这张图片内容，提取其中的招标需求。
 
 ## 上下文信息
 - 章节标题：{node.title}
 - 页码范围：{node.start_index}-{node.end_index}
 - 节点ID：{node.node_id or "UNKNOWN"}
+- 当前图片：{rel_path}
 
 ## 任务说明
-这些图片来自招标文件的"{node.title}"章节。请仔细分析图片中的内容：
+这张图片来自招标文件的"{node.title}"章节。请仔细分析图片中的内容：
 - 如果是**表格**：提取表格中的技术参数、规格要求、性能指标等
 - 如果是**流程图/架构图**：提取系统架构要求、技术选型要求、部署要求等
 - 如果是**截图/示例**：提取界面要求、功能要求、用户体验要求等
@@ -403,7 +411,7 @@ def _extract_requirements_from_images(
 1. **准确性**：只提取明确的需求，不要推测或添加图片中没有的内容
 2. **完整性**：不要遗漏图片中的重要需求
 3. **分类**：对每个需求进行类型分类（SOLUTION/QUALIFICATION/BUSINESS/FORMAT/PROCESS/OTHER）
-4. **来源标注**：original_text字段填写"[图片内容]"加上具体描述
+4. **来源标注**：original_text字段填写"[图片内容] "加上具体描述
 5. **caption填充**：
    - 如果是图片（架构图/流程图/截图等），填充image_caption字段
    - 如果是表格，填充table_caption字段
@@ -431,51 +439,62 @@ def _extract_requirements_from_images(
 
 如果图片中没有需求信息，返回空数组[]。
 """
-        
-        # 调用视觉模型
-        response_text = llm_service.vision_completion(
-            text_prompt=prompt,
-            image_inputs=image_paths,
-            temperature=0.2,
-            max_tokens=4000
-        )
-        
-        # 解析JSON响应
-        import json
-        try:
-            # 尝试提取JSON数组
-            json_match = re.search(r'\[[\s\S]*\]', response_text)
-            if json_match:
-                requirements_data = json.loads(json_match.group())
-            else:
-                logger.warning(f"视觉模型返回的内容不包含JSON数组: {response_text[:200]}")
-                return []
             
-            # 转换为RequirementItem对象
-            requirements = []
-            for i, req_data in enumerate(requirements_data, 1):
-                # 补充必需字段
-                req_data.setdefault('section_id', node.node_id or "UNKNOWN")
-                req_data.setdefault('section_title', node.title)
-                req_data.setdefault('page_number', node.start_index)
-                req_data.setdefault('matrix_id', create_matrix_id(node.node_id or "UNKNOWN", i))
-                req_data.setdefault('category', 'OTHER')
-                req_data.setdefault('response_suggestion', '请在方案中响应此图片内容')
-                req_data.setdefault('risk_warning', '无')
-                req_data.setdefault('notes', '图片来源')
+            # ✅ 单张图片调用视觉模型
+            response_text = llm_service.vision_completion(
+                text_prompt=prompt,
+                image_inputs=[abs_path],  # 单张图片
+                temperature=0.2,
+                max_tokens=4000  # 单张图片4000足够
+            )
+            
+            # 解析JSON响应
+            import json
+            try:
+                # 尝试提取JSON数组
+                json_match = re.search(r'\[[\s\S]*\]', response_text)
+                if json_match:
+                    requirements_data = json.loads(json_match.group())
+                else:
+                    logger.warning(f"图片 {rel_path} 的视觉模型返回不包含JSON数组")
+                    continue
                 
-                # 创建RequirementItem
-                req = RequirementItem(**req_data)
-                requirements.append(req)
+                # 转换为RequirementItem对象
+                for i, req_data in enumerate(requirements_data, 1):
+                    # 补充必需字段
+                    req_data.setdefault('section_id', node.node_id or "UNKNOWN")
+                    req_data.setdefault('section_title', node.title)
+                    req_data.setdefault('page_number', node.start_index)
+                    req_data.setdefault('category', 'OTHER')
+                    req_data.setdefault('response_suggestion', '请在方案中响应此图片内容')
+                    req_data.setdefault('risk_warning', '无')
+                    req_data.setdefault('notes', '图片来源')
+                    
+                    # ✅ 关键：精确填充img_path（我们确切知道这个需求来自哪张图片）
+                    req_data['img_path'] = rel_path
+                    
+                    # ✅ 修复：先分配临时matrix_id（后续会统一重新编号）
+                    temp_matrix_id = create_matrix_id(node.node_id or "UNKNOWN", len(all_requirements) + i)
+                    req_data.setdefault('matrix_id', temp_matrix_id)
+                    
+                    # 创建RequirementItem
+                    req = RequirementItem(**req_data)
+                    all_requirements.append(req)
+                
+                logger.info(f"  ✓ 图片 {rel_path} 提取到 {len(requirements_data)} 条需求")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"图片 {rel_path} 的JSON解析失败: {e}")
+                logger.debug(f"原始返回: {response_text[:200]}")
+                continue
             
-            logger.info(f"✓ 从图片中提取到 {len(requirements)} 条需求")
-            return requirements
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"解析视觉模型返回的JSON失败: {e}")
-            logger.debug(f"原始返回: {response_text}")
-            return []
-        
-    except Exception as e:
-        logger.error(f"视觉模型提取需求失败: {e}")
-        return []
+        except Exception as e:
+            logger.error(f"图片 {rel_path} 处理失败: {e}")
+            continue
+    
+    # 为所有需求统一编号（跨图片连续编号）
+    for i, req in enumerate(all_requirements, 1):
+        req.matrix_id = create_matrix_id(node.node_id or "UNKNOWN", i)
+    
+    logger.info(f"✓ 从 {len(image_paths)} 张图片中总计提取到 {len(all_requirements)} 条需求")
+    return all_requirements
