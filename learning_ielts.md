@@ -146,4 +146,22 @@
     Firstly, the development of technology has made various foods more accessible, which not only enriches people's dietary choices, but also enables people to obtain nutritionally balanced food more conveniently, thereby improving overall health levels.
     Secondly, the development of technology has promoted the formation of safe eating habits. Specifically, modern technology has made the production and processing of food more transparent, which means that people can understand the ingredients and nutritional value of food through labels and information, thereby making healthier choices. Moreover, the development of technology has also promoted the spread of healthy eating concepts, making more people realize the importance of a reasonable diet for health.
     In conclusion, although the improvements of the range and the quality of food has made some negative effects for people's healthy, I maintain that the improvements of the range and the quality of food has significantly improved the quality of people's life, while we can avoid the negative effects through reasonable eating habits.
-    
+2016.10.13
+    Some scientists believe intelligent life forms may exist in other planets and some want to send messages to the space to contact with these life forms. But other scientists believe it is a bad idea and it could be dangerous. Discuss both ideas and give your own opinion.
+    与其他星球的智慧生命建立联系危险与否在科学界一直是一个充满争议的话题，我认为是危险的，但是这并不应该成为我们探索其他星球智慧生物的阻碍。
+    诚然，试图与其他星球的智慧生物建立联系可能会给地球带来潜在的威胁。
+    首先，我们对其他星球是否有智慧生命都知之甚少，更不用说这些智慧生命是否带有恶意了，这意味着，如果我们向宇宙发送信息，可能会引来一些敌对的智慧生命，从而对地球造成威胁。
+    其次，其他星球的智慧生命可能拥有我们无法想象的先进技术，这意味着，当这些智慧生命用这些先进技术侵略地球时，我们可能连防御的机会都没有，从而导致地球文明的毁灭。
+    然而，我认为，这并不应该成为我们探索其他星球智慧生物的阻碍。
+    首先，探索其他星球的智慧生命有助于提升人类的科学技术水平。具体来说，为了与其他星球的智慧生命建立联系，我们需要发展更先进的通信技术和太空探索技术，这不仅能够推动相关领域的科技进步，还能够促进其他领域的技术创新，从而提升整体的科学技术水平。
+    其次，探索其他星球的智慧生命有助于促进人类的团结与合作。具体来说，探索其他星球的智慧生命需要全球各国的共同努力，这意味着，各国需要克服政治、经济和文化等方面的差异，携手合作，共同应对这一挑战，从而促进全球的团结与合作。
+    综上所述，虽然试图与其他星球的智慧生物建立联系可能会给地球带来潜在的威胁，但我认为，这并不应该成为我们探索其他星球智慧生物的阻碍。
+    Whether it is dangerous to establish contact with intelligent life forms on other planets is remain a controversial topic in the scientific community. I think it is dangerous, but it can not be the obstacle for people to explore intelligent life forms on other planets.
+    Admittedly, trying to establish contact with intelligent life forms on other planets may bring potential threats to the earth. 
+    Firstly, people know little about whether there are intelligent life forms on other planets, let alone whether those intelligent life forms are hostile, which means that if people send messages to the universe, it may lead to some hostile intelligent life forms, thereby threatening the earth.
+    Secondly, other planets' intelligent life forms may have advanced technology beyond people's imagination, which means that when those intelligent life forms invade the earth with these advanced technologies, people may not have the chance to defend, thus leading to the destruction of earth civilization.
+    However, I maintain that it can not be the obstacle of exploring intelligent life forms on other planets.
+    Firstly, exploring other planets' intelligent life forms helps to improve human scientific and technological level.
+    Specifically, in order to establish contact with intelligent life forms on other planets, people need to develop more advanced communication technology and space exploration technology, which not only can enhance the technological progress in related fields, but also can promote technological innovation in other fields, thereby improving the overall scientific and technological level.
+    Secondly, exploring other planets' intelligent life forms helps to promote human unity and cooperation. Specifically, exploring other planets' intelligent life forms requires the joint efforts of all countries around the world, which means that countries need to overcome political, economic and cultural differences, work together to cope with this challenge, thereby promoting global unity and cooperation.
+    In conclusion, although trying to establish contact with intelligent life forms on other planets may bring potential threats to the earth, I maintain that it can not be the obstacle for people to explore intelligent life forms on other planets.

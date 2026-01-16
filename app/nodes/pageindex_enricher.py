@@ -164,7 +164,7 @@ def _prepare_node_content(node: PageIndexNode) -> str:
 
 def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
     """
-    构建需求提取的提示词（智能版：处理标题中的需求 + 类型分类）
+    构建需求提取的提示词（智能版：处理标题中的需求 + 类型分类 + 表格识别）
     """
     prompt = f"""你是招标文件分析专家。请分析以下章节内容（包含标题和原文），提取所有招标需求，并对每个需求进行分类。
 
@@ -182,10 +182,26 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 2. **短标题/分类标题**：如果标题只是分类名称（如"性能要求"、"技术规范"），则从原文中提取需求
 3. **综合情况**：标题和原文都可能包含需求，请两者都仔细分析，避免遗漏
 
+**识别表格来源（新增）**：
+- 如果内容包含`【表格：images/xxx.jpg】`标记，说明这是表格内容
+- 提取表格中的需求时，必须填充`img_path`字段（从标记中提取）
+- 同时填充`table_caption`字段（从标记后的标题文本提取）
+- 示例：
+  ```
+  【表格：images/abc.jpg】投标人须知前附表
+  条款号 | 条款名称 | 编列内容
+  1.1.2 | 招标人 | 名称：江麓机电集团
+  ```
+  提取时：
+  - img_path: "images/abc.jpg"
+  - table_caption: ["投标人须知前附表"]
+  - original_text: "【表格：images/abc.jpg】投标人须知前附表\n条款号 | 条款名称 | ..."
+
 **提取来源判断**：
 - 标题包含明确需求 → 从标题提取，original_text填写标题内容
 - 标题仅是分类 → 从原文提取，original_text填写原文内容
 - 标题和原文都有需求 → 分别提取，各自记录original_text
+- **表格内容** → 提取需求，original_text保留完整表格文本，img_path填充路径
 
 ## 需求类型分类（新增）
 
@@ -246,6 +262,9 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
    - response_suggestion：建议的应答方向（1句话，结合category）
    - risk_warning：潜在风险提示（如果有，没有则填"无"）
    - notes：其他备注（如果有，没有则填"无"）
+   - **img_path**：图片/表格路径（字符串，如"images/xxx.jpg"，从标记中提取）
+   - **image_caption**：图片描述（字符串，不是列表！）
+   - **table_caption**：表格标题（字符串，不是列表！如"投标人须知前附表"）
 
 3. **重要提醒**：
     - 上述内容已包含章节标题和精确原文
@@ -274,6 +293,9 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 - response_suggestion: "在技术方案中说明系统架构设计和性能优化方案"
 - risk_warning: "需要进行压力测试验证性能指标"
 - notes: "关键性能指标"
+- img_path: ""（非图片/表格需求，保持为空）
+- image_caption: []
+- table_caption: []
 
 **示例2：资质类需求（QUALIFICATION）**
 ```
@@ -323,6 +345,40 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 3. requirement: "需提供软件著作权证书"
    original_text: "投标人需提供软件著作权证书。"
    category: "QUALIFICATION"
+
+**示例5：表格类需求（SOLUTION/QUALIFICATION/BUSINESS等）**
+```
+【表格：images/table_123.jpg】投标人须知前附表
+条款号 | 条款名称 | 编列内容
+1.1.2 | 招标人 | 名称：江麓机电集团有限公司
+1.1.3 | 招标代理机构 | 名称：北京五环国际工程管理有限公司
+1.3.2 | 交货期 | 合同生效后3个月内
+```
+应提取为：
+1. requirement: "招标人为江麓机电集团有限公司"
+   original_text: "【表格：images/table_123.jpg】投标人须知前附表\n条款号 | 条款名称 | 编列内容\n1.1.2 | 招标人 | 名称：江麓机电集团有限公司"
+   category: "BUSINESS"
+   img_path: "images/table_123.jpg"
+   table_caption: "投标人须知前附表"
+   
+2. requirement: "招标代理机构为北京五环国际工程管理有限公司"
+   original_text: "【表格：images/table_123.jpg】投标人须知前附表\n条款号 | 条款名称 | 编列内容\n1.1.3 | 招标代理机构 | 名称：北京五环国际工程管理有限公司"
+   category: "BUSINESS"
+   img_path: "images/table_123.jpg"
+   table_caption: "投标人须知前附表"
+   
+3. requirement: "交货期为合同生效后3个月内"
+   original_text: "【表格：images/table_123.jpg】投标人须知前附表\n条款号 | 条款名称 | 编列内容\n1.3.2 | 交货期 | 合同生效后3个月内"
+   category: "BUSINESS"
+   img_path: "images/table_123.jpg"
+   table_caption: "投标人须知前附表"
+
+**重要提示**：
+- 表格中的每个需求行都应单独提取
+- 所有从同一表格提取的需求共享相同的img_path和table_caption
+- original_text应包含表格标记、标题和具体行的内容
+- img_path是后续需求定位的关键，必须准确填充
+- **table_caption和image_caption必须是字符串格式，绝对不要使用列表！**
 """
     return prompt
 

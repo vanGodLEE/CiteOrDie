@@ -10,6 +10,7 @@
 import re
 from typing import Optional, List, Tuple, Dict, Any
 from difflib import SequenceMatcher
+from html.parser import HTMLParser
 
 
 class TitleMatcher:
@@ -294,18 +295,40 @@ class TitleMatcher:
                         text_parts.append(f"![{filename}]({img_path})")
             
             elif content_type == "table":
-                # 表格转换为Markdown格式
-                img_path = content.get("img_path", "")
+                # 表格转换为文本格式（caption + table_body文本）
+                # 同时保留img_path用于后续的需求定位
                 caption = content.get("table_caption", [])
-                if img_path:
-                    if caption:
-                        caption_text = " ".join(caption)
-                        text_parts.append(f"![{caption_text}]({img_path})")
+                table_body = content.get("table_body", "")
+                img_path = content.get("img_path", "")
+                
+                # 构建表格文本
+                table_text_parts = []
+                
+                # 1. 添加标题（包含img_path标识，用于需求定位）
+                if caption:
+                    caption_text = " ".join(caption)
+                    if img_path:
+                        # 格式：【表格：img_path】caption
+                        # img_path用于需求定位器找到表格的bbox
+                        table_text_parts.append(f"【表格：{img_path}】{caption_text}")
                     else:
-                        # 使用文件名作为caption
-                        import os
-                        filename = os.path.basename(img_path)
-                        text_parts.append(f"![{filename}]({img_path})")
+                        table_text_parts.append(f"【表格】{caption_text}")
+                else:
+                    if img_path:
+                        table_text_parts.append(f"【表格：{img_path}】")
+                    else:
+                        table_text_parts.append("【表格】")
+                
+                # 2. 添加表格内容（HTML转文本）
+                if table_body:
+                    # 将HTML表格转换为纯文本
+                    table_content = _convert_html_table_to_text(table_body)
+                    if table_content:
+                        table_text_parts.append(table_content)
+                
+                # 拼接表格文本
+                if len(table_text_parts) > 1:  # 至少有标题+内容
+                    text_parts.append("\n".join(table_text_parts))
         
         # 用双换行符连接各部分
         return "\n\n".join(text_parts)
@@ -490,3 +513,100 @@ def extract_content_by_title_range(
     )
     
     return TitleMatcher.extract_text_from_contents(contents)
+
+
+def _convert_html_table_to_text(html_table: str) -> str:
+    """
+    将HTML表格转换为纯文本格式
+    
+    Args:
+        html_table: HTML表格字符串（如: <table><tr><td>...</td></tr></table>）
+        
+    Returns:
+        纯文本格式的表格内容
+        
+    示例：
+        输入: <table><tr><td>姓名</td><td>年龄</td></tr><tr><td>张三</td><td>25</td></tr></table>
+        输出: 姓名 | 年龄
+              张三 | 25
+    """
+    if not html_table:
+        return ""
+    
+    try:
+        # 使用HTMLTableParser解析表格
+        parser = HTMLTableParser()
+        parser.feed(html_table)
+        
+        if not parser.rows:
+            return ""
+        
+        # 将表格数据转换为文本
+        text_lines = []
+        for row in parser.rows:
+            if row:  # 跳过空行
+                # 用 | 分隔单元格
+                line = " | ".join(cell.strip() for cell in row if cell.strip())
+                if line:
+                    text_lines.append(line)
+        
+        return "\n".join(text_lines)
+        
+    except Exception as e:
+        # 如果解析失败，fallback到简单的文本提取
+        # 移除所有HTML标签，保留文本内容
+        text = re.sub(r'<[^>]+>', ' ', html_table)
+        # 压缩多余空格
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+
+
+class HTMLTableParser(HTMLParser):
+    """
+    HTML表格解析器
+    
+    解析<table>标签，提取所有行和单元格的文本内容
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+        self.current_row = []
+        self.current_cell = []
+        self.in_table = False
+        self.in_row = False
+        self.in_cell = False
+    
+    def handle_starttag(self, tag, attrs):
+        tag_lower = tag.lower()
+        
+        if tag_lower == 'table':
+            self.in_table = True
+        elif tag_lower == 'tr' and self.in_table:
+            self.in_row = True
+            self.current_row = []
+        elif tag_lower in ('td', 'th') and self.in_row:
+            self.in_cell = True
+            self.current_cell = []
+    
+    def handle_endtag(self, tag):
+        tag_lower = tag.lower()
+        
+        if tag_lower == 'table':
+            self.in_table = False
+        elif tag_lower == 'tr' and self.in_row:
+            self.in_row = False
+            if self.current_row:
+                self.rows.append(self.current_row)
+            self.current_row = []
+        elif tag_lower in ('td', 'th') and self.in_cell:
+            self.in_cell = False
+            # 将单元格文本添加到当前行
+            cell_text = ''.join(self.current_cell).strip()
+            self.current_row.append(cell_text)
+            self.current_cell = []
+    
+    def handle_data(self, data):
+        if self.in_cell:
+            # 收集单元格内的文本
+            self.current_cell.append(data)
