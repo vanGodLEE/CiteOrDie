@@ -152,6 +152,10 @@ class TitleMatcher:
         if content_type == "text":
             return content.get("text", "")
         
+        elif content_type == "header":
+            # header类型：直接使用text字段
+            return content.get("text", "")
+        
         elif content_type == "list":
             # list类型：拼接所有list_items
             list_items = content.get("list_items", [])
@@ -273,6 +277,13 @@ class TitleMatcher:
                 text = content.get("text", "")
                 if text:
                     text_parts.append(text)
+            
+            elif content_type == "header":
+                # header类型：作为标题，通常不需要提取到原文中
+                # 但为了完整性，可以选择性包含
+                text = content.get("text", "")
+                if text:
+                    text_parts.append(f"# {text}")
             
             elif content_type == "list":
                 list_items = content.get("list_items", [])

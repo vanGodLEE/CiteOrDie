@@ -20,7 +20,7 @@ class ClauseItem(BaseModel):
     """
     可执行条款模型（Actionable Clauses）
     
-    适用范围：标书、合同、合规制度、SOP、标准规范、政策文件等
+    适用范围：招标书、合同、合规制度、SOP、标准规范、政策文件、协议等各类文档
     
     核心结构化字段：
     1. type - 条款类型
@@ -49,7 +49,7 @@ class ClauseItem(BaseModel):
     )
     actor: Optional[str] = Field(
         None,
-        description="执行主体：supplier(供应商)|buyer(采购方)|system(系统)|organization(组织)|role(角色名称)|其他"
+        description="执行主体：party_a(甲方)|party_b(乙方)|provider(提供方)|client(客户方)|system(系统)|organization(组织)|role(角色名称)|其他"
     )
     action: Optional[str] = Field(
         None,

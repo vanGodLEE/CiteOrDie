@@ -152,7 +152,7 @@ class Clause(Base):
     """
     可执行条款表（Actionable Clauses）
     
-    支持从多种文档类型中提取结构化条款：标书、合同、合规制度、SOP、标准规范、政策文件等
+    支持从多种文档类型中提取结构化条款：招标书、合同、合规制度、SOP、标准规范、政策文件、协议等
     包含条款的结构化字段（type, actor, action, object, condition, deadline, metric）
     以及视觉内容和位置信息
     """

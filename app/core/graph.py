@@ -1,7 +1,7 @@
 """
 LangGraph工作流定义
 
-构建基于PageIndex+MinerU的招标分析工作流：
+构建基于PageIndex+MinerU的文档条款提取工作流：
 pageindex_parser → mineru_parser → Map(text_fillers) → aggregator → Map(enrichers) → auditor → requirement_locator
 """
 
@@ -25,7 +25,7 @@ from app.nodes.requirement_locator import requirement_locator_node
 
 def create_tender_analysis_graph():
     """
-    创建招标分析工作流图
+    创建文档条款提取工作流图
     
     工作流拓扑（完整版）：
     START → pageindex_parser → mineru_parser → [text_fillers并行] → aggregator
@@ -37,7 +37,7 @@ def create_tender_analysis_graph():
     3. text_fillers (并行): 基于MinerU的content_list为每个节点并行填充精确原文
     4. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
     5. enrichers (并行): 为每个叶子节点并行提取条款（文本+视觉模型）
-    6. auditor: 汇总所有条款，生成最终矩阵
+    6. auditor: 汇总所有条款，生成最终条款矩阵
     7. requirement_locator: 为每个条款定位positions（图片/表格→节点positions，文本→智能匹配）
     
     性能优化：

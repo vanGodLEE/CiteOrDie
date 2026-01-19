@@ -74,7 +74,7 @@ def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:
             
             # 调用LLM
             messages = [
-                {"role": "system", "content": "你是一个专业的招标需求分析专家。"},
+                {"role": "system", "content": "你是一个专业的文档分析专家，擅长从各类文档中提取结构化条款。"},
                 {"role": "user", "content": prompt}
             ]
             
@@ -170,7 +170,7 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 请分析以下章节内容，提取所有可执行条款，并对每个条款进行结构化分析。
 
-**适用文档类型**：标书、合同、合规制度、SOP、标准规范、政策文件等。
+**适用文档类型**：招标书、合同、合规制度、SOP、标准规范、政策文件、协议等各类文档。
 
 ## 章节信息
 - 页码范围：{node.start_index}-{node.end_index}
@@ -185,18 +185,20 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 ### 1. type（条款类型）- **必填**
 必须选择以下之一：
-- **obligation**（义务）：必须做某事，如"供应商应提供..."、"买方需确保..."
+- **obligation**（义务）：必须做某事，如"甲方应提供..."、"乙方需确保..."
 - **requirement**（需求）：对产品/服务的要求，如"系统需支持1000并发"、"响应时间不超过2秒"
 - **prohibition**（禁止）：禁止做某事，如"不得转包"、"禁止使用..."
 - **deliverable**（交付物）：需要交付的成果，如"需提交技术方案"、"需提供培训手册"
-- **deadline**（截止时间）：时间节点要求，如"投标截止时间"、"交付期限"
+- **deadline**（截止时间）：时间节点要求，如"提交截止时间"、"交付期限"
 - **penalty**（惩罚）：违约后果，如"逾期每天罚款..."、"不合格扣除保证金"
-- **definition**（定义）：术语定义，如"本合同中的'系统'是指..."
+- **definition**（定义）：术语定义，如"本文档中的'系统'是指..."
 
 ### 2. actor（执行主体）- 选填
 谁来执行这个条款：
-- **supplier**（供应商）：投标人、承包商、乙方
-- **buyer**（采购方）：招标人、发包方、甲方
+- **party_a**（甲方）：文档中的第一方、委托方、采购方
+- **party_b**（乙方）：文档中的第二方、承包方、供应方
+- **provider**（提供方）：服务或产品提供者
+- **client**（客户方）：接收服务或产品的一方
 - **system**（系统）：软件系统、设备
 - **organization**（组织）：项目组、监理方
 - **role**（角色）：项目经理、技术负责人
@@ -214,7 +216,7 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 ### 4. object（作用对象）- 选填
 对什么产生作用：
-- **document**（文档）：技术方案、投标文件
+- **document**（文档）：技术方案、报告文件
 - **feature**（功能）：系统功能、业务功能
 - **KPI**（指标）：性能指标、质量指标
 - **material**（材料）：设备、软件、硬件
@@ -325,32 +327,32 @@ def _build_extraction_prompt(node: PageIndexNode, content: str) -> str:
 
 **示例3：交付物类条款（deliverable）**
 ```
-投标人需提供技术方案、实施方案和培训计划各一份。
+乙方需提供技术方案、实施方案和培训计划各一份。
 ```
 提取为：
 ```json
 {{
   "type": "deliverable",
-  "actor": "supplier",
+  "actor": "party_b",
   "action": "provide",
   "object": "technical documents",
   "condition": null,
   "deadline": null,
   "metric": "技术方案、实施方案、培训计划各一份",
-  "original_text": "投标人需提供技术方案、实施方案和培训计划各一份。",
+  "original_text": "乙方需提供技术方案、实施方案和培训计划各一份。",
   "page_number": {node.start_index}
 }}
 ```
 
 **示例4：截止时间类条款（deadline）**
 ```
-投标文件递交截止时间：2024年12月31日上午10:00（北京时间）
+文件递交截止时间：2024年12月31日上午10:00（北京时间）
 ```
 提取为：
 ```json
 {{
   "type": "deadline",
-  "actor": "supplier",
+  "actor": "party_b",
   "action": "submit",
   "object": "bidding documents",
   "condition": null,

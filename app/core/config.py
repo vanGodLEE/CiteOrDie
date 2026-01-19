@@ -132,19 +132,19 @@ class Settings(BaseSettings):
     
     # ==================== Minio配置 ====================
     minio_endpoint: str = Field(
-        default="192.168.100.219:19000",
-        description="MinIO服务器地址（S3 API端口，通常是9000或19000）"
+        default="localhost:9000",
+        description="MinIO服务器地址（S3 API端口，通常是9000）"
     )
     minio_access_key: str = Field(
-        default="rag_flow",
+        default="minioadmin",
         description="MinIO访问密钥"
     )
     minio_secret_key: str = Field(
-        default="infini_rag_flow",
+        default="minioadmin",
         description="MinIO密钥"
     )
     minio_bucket: str = Field(
-        default="tender-pdf",
+        default="document-pdf",
         description="MinIO存储桶名称"
     )
     minio_secure: bool = Field(

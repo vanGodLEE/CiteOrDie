@@ -1,7 +1,7 @@
 """
 FastAPI入口 - Web API服务
 
-提供招标分析的HTTP接口
+提供文档条款提取的HTTP接口
 """
 
 from pathlib import Path
@@ -21,8 +21,8 @@ from app.api.query import router as query_router
 # ============================================================================
 
 app = FastAPI(
-    title="智能招标书分析API",
-    description="基于LangGraph的招标文件智能分析系统，支持异步处理和实时进度推送",
+    title="智能文档条款提取API",
+    description="基于LangGraph的文档智能分析系统，支持从招标书、合同、合规文档等多种文档中提取结构化条款，支持异步处理和实时进度推送",
     version="0.2.0"
 )
 
@@ -81,8 +81,8 @@ class HealthResponse(BaseModel):
 async def root():
     """根路径"""
     return {
-        "message": "智能招标书分析API",
-        "version": "0.1.0",
+        "message": "智能文档条款提取API",
+        "version": "0.2.0",
         "docs": "/docs"
     }
 
