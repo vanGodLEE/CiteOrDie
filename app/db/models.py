@@ -47,6 +47,7 @@ class Task(Base):
     
     # 分析结果（JSON存储）
     document_tree_json = Column(Text, comment="PageIndex文档树结构（JSON格式）")
+    quality_report_json = Column(Text, comment="质量报告（JSON格式）：包含解析精度、原文抽取成功率等指标")
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="任务创建时间")

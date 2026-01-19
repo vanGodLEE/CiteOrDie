@@ -193,12 +193,15 @@ class MinioService:
             logger.error(f"从MinIO下载PDF失败: {e}")
             raise Exception(f"MinIO下载失败: {str(e)}")
     
-    def delete_pdf(self, task_id: str):
+    def delete_pdf(self, task_id: str) -> bool:
         """
         删除task_id下的所有PDF文件
         
         Args:
             task_id: 任务ID
+            
+        Returns:
+            是否成功删除
         """
         try:
             # 列出该task_id下的所有对象
@@ -209,18 +212,28 @@ class MinioService:
             )
             
             # 删除所有对象
+            deleted_count = 0
             for obj in objects:
                 self.client.remove_object(
                     bucket_name=self.bucket_name,
                     object_name=obj.object_name
                 )
                 logger.debug(f"已删除: {obj.object_name}")
+                deleted_count += 1
             
-            logger.info(f"✓ 已删除task_id={task_id}的所有文件")
+            if deleted_count > 0:
+                logger.info(f"✓ 已删除task_id={task_id}的 {deleted_count} 个文件")
+            else:
+                logger.warning(f"MinIO中没有找到task_id={task_id}的文件")
+            
+            return True
             
         except S3Error as e:
             logger.error(f"从MinIO删除PDF失败: {e}")
-            raise Exception(f"MinIO删除失败: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"从MinIO删除PDF失败: {e}")
+            return False
 
 
 # 全局单例

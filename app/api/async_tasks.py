@@ -99,7 +99,8 @@ class TaskManager:
         message: str = None,
         result: dict = None,
         error: str = None,
-        document_tree: dict = None
+        document_tree: dict = None,
+        quality_report: dict = None
     ):
         """更新任务状态"""
         if task_id not in task_store:
@@ -148,7 +149,7 @@ class TaskManager:
         try:
             db = get_db_session()
             try:
-                # 更新任务状态（包括elapsed_seconds和document_tree）
+                # 更新任务状态（包括elapsed_seconds、document_tree和quality_report）
                 TaskRepository.update_task_status(
                     db,
                     task_id=task_id,
@@ -157,7 +158,8 @@ class TaskManager:
                     message=message,
                     error=error,
                     elapsed_seconds=task.get("elapsed_seconds"),
-                    document_tree=document_tree
+                    document_tree=document_tree,
+                    quality_report=quality_report
                 )
                 
                 # 记录日志（用于复盘）

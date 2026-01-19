@@ -142,32 +142,64 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         tree_data = None
         if pageindex_doc:
             tree_data = pageindex_doc.model_dump()
-            
-            # ✅ 转换document_tree中所有节点的positions
-            def convert_tree_positions(node_data: dict):
-                """递归转换树节点的positions"""
-                if node_data.get("positions"):
-                    try:
-                        node_data["positions"] = convert_positions_for_frontend(
-                            node_data["positions"], 
-                            pdf_path
-                        )
-                    except Exception as e:
-                        logger.warning(f"转换节点 {node_data.get('title')} 的positions失败: {e}")
-                
-                # 递归处理子节点
-                if node_data.get("nodes"):
-                    for child in node_data["nodes"]:
-                        convert_tree_positions(child)
-            
-            # 转换根节点和所有子节点
-            if tree_data.get("structure"):
-                for root_node in tree_data["structure"]:
-                    convert_tree_positions(root_node)
-                
-                logger.info("✅ document_tree中所有节点的positions已转换为页面坐标")
         
-        # 更新任务状态为完成（包括document_tree持久化到数据库）
+        # ✅ 生成质量报告（不修改原有流程，仅增量添加）
+        quality_report = None
+        try:
+            from app.services.quality_report import QualityReportService
+            
+            if pageindex_doc and final_matrix:
+                logger.info("开始生成质量报告...")
+                
+                # 将final_matrix转为字典格式
+                final_matrix_dict = []
+                for clause in final_matrix:
+                    if hasattr(clause, 'model_dump'):
+                        final_matrix_dict.append(clause.model_dump())
+                    elif hasattr(clause, 'dict'):
+                        final_matrix_dict.append(clause.dict())
+                    else:
+                        final_matrix_dict.append(dict(clause))
+                
+                report = QualityReportService.generate_report(
+                    pdf_path=pdf_path,
+                    document_tree=tree_data,
+                    final_matrix=final_matrix_dict
+                )
+                
+                quality_report = report.model_dump()
+                logger.success("✅ 质量报告生成完成")
+            else:
+                logger.warning("缺少必要数据，跳过质量报告生成")
+        except Exception as e:
+            logger.error(f"生成质量报告失败（不影响主流程）: {e}")
+            logger.exception(e)
+        
+        # ✅ 转换document_tree中所有节点的positions（移到except外面，确保一定执行）
+        def convert_tree_positions(node_data: dict):
+            """递归转换树节点的positions"""
+            if node_data.get("positions"):
+                try:
+                    node_data["positions"] = convert_positions_for_frontend(
+                        node_data["positions"], 
+                        pdf_path
+                    )
+                except Exception as e:
+                    logger.warning(f"转换节点 {node_data.get('title')} 的positions失败: {e}")
+            
+            # 递归处理子节点
+            if node_data.get("nodes"):
+                for child in node_data["nodes"]:
+                    convert_tree_positions(child)
+        
+        # 转换根节点和所有子节点
+        if tree_data.get("structure"):
+            for root_node in tree_data["structure"]:
+                convert_tree_positions(root_node)
+            
+            logger.info("✅ document_tree中所有节点的positions已转换为页面坐标")
+        
+        # 更新任务状态为完成（包括document_tree和quality_report持久化到数据库）
         TaskManager.update_task(
             task_id,
             status="completed",
@@ -175,9 +207,11 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             message=f"分析完成！共提取 {len(final_matrix)} 条条款",
             result={
                 "clauses_count": len(final_matrix),
-                "document_tree": tree_data  # 保存完整树结构到内存
+                "document_tree": tree_data,  # 保存完整树结构到内存
+                "quality_report": quality_report  # 保存质量报告到内存
             },
-            document_tree=tree_data  # 持久化到数据库
+            document_tree=tree_data,  # 持久化到数据库
+            quality_report=quality_report  # 持久化质量报告到数据库
         )
         
     except Exception as e:
@@ -471,7 +505,26 @@ async def get_task_info(task_id: str):
             # ✅ document_tree中的positions已在保存时转换（左上原点，单位points）
             task["document_tree"] = document_tree
             
+            # 3. 读取quality_report（优先从内存，再从数据库）
+            quality_report = None
+            
+            # 尝试从内存result获取
+            if task.get("result") and isinstance(task["result"], dict):
+                quality_report = task["result"].get("quality_report")
+            
+            # 如果内存没有，从数据库读取
+            if not quality_report:
+                if task_record and task_record.quality_report_json:
+                    try:
+                        quality_report = json.loads(task_record.quality_report_json)
+                    except Exception as e:
+                        logger.error(f"解析quality_report失败: {e}")
+            
+            task["quality_report"] = quality_report
+            
             logger.info(f"任务 {task_id}: 返回 {len(matrix)} 条条款")
+            if quality_report:
+                logger.info(f"  - 包含质量报告: 解析置信度={quality_report.get('avg_parse_confidence', 0):.2%}")
                 
         finally:
             db.close()
@@ -538,6 +591,135 @@ async def download_excel(task_id: str):
     except Exception as e:
         logger.error(f"生成Excel失败: {e}")
         raise HTTPException(status_code=500, detail=f"生成Excel失败: {str(e)}")
+
+
+@router.get("/quality-report/{task_id}")
+async def get_quality_report(task_id: str):
+    """
+    获取任务的质量报告
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        包含4个质量指标的报告
+    """
+    # 获取任务信息
+    task = TaskManager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="任务尚未完成")
+    
+    # 从数据库获取quality_report
+    from app.db.repositories import TaskRepository
+    from app.db.database import SessionLocal
+    import json
+    
+    db = SessionLocal()
+    try:
+        task_record = TaskRepository.get_task(db, task_id)
+        if not task_record:
+            raise HTTPException(status_code=404, detail="任务记录不存在")
+        
+        quality_report = None
+        
+        # 1. 尝试从内存获取
+        if task.get("result") and isinstance(task["result"], dict):
+            quality_report = task["result"].get("quality_report")
+        
+        # 2. 如果内存没有，从数据库读取
+        if not quality_report and task_record.quality_report_json:
+            try:
+                quality_report = json.loads(task_record.quality_report_json)
+            except Exception as e:
+                logger.error(f"解析quality_report失败: {e}")
+        
+        if not quality_report:
+            raise HTTPException(status_code=404, detail="未找到质量报告（可能是历史任务，请重新分析）")
+        
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "file_name": task_record.file_name,
+            "quality_report": quality_report
+        }
+        
+    finally:
+        db.close()
+
+
+@router.delete("/task/{task_id}")
+async def delete_task(task_id: str):
+    """
+    删除任务及其所有相关文件
+    
+    删除内容包括：
+    1. 数据库记录（task, logs, sections, clauses）
+    2. MinIO中的PDF文件
+    3. 本地PDF文件（temp/uploads）
+    4. MinerU输出目录
+    5. 日志文件
+    6. middle_json文件
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        删除结果
+    """
+    from app.db.repositories import TaskRepository
+    from app.db.database import SessionLocal
+    from app.services.task_cleanup import TaskCleanupService
+    
+    db = SessionLocal()
+    try:
+        # 1. 获取任务信息（用于清理文件）
+        task_record = TaskRepository.get_task(db, task_id)
+        if not task_record:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        
+        pdf_path = task_record.pdf_path
+        file_name = task_record.file_name
+        
+        logger.info(f"开始删除任务: {task_id} ({file_name})")
+        
+        # 2. 清理所有相关文件
+        cleanup_results = TaskCleanupService.cleanup_task(
+            task_id=task_id,
+            pdf_path=pdf_path,
+            file_name=file_name
+        )
+        
+        # 3. 删除数据库记录（包括级联删除logs/sections/clauses）
+        db_deleted = TaskRepository.delete_task(db, task_id)
+        cleanup_results["database"] = db_deleted
+        
+        # 4. 从内存中清除任务缓存
+        TaskManager.delete_task(task_id)
+        
+        # 统计成功项
+        success_items = [k for k, v in cleanup_results.items() if v and k != "task_id"]
+        total_items = len(cleanup_results) - 1  # 减去task_id字段
+        
+        logger.success(f"✅ 任务删除完成: {task_id}，成功 {len(success_items)}/{total_items} 项")
+        
+        return {
+            "status": "success",
+            "task_id": task_id,
+            "message": f"任务已删除（{len(success_items)}/{total_items}项成功）",
+            "details": cleanup_results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除任务失败: {e}")
+        logger.exception(e)
+        raise HTTPException(status_code=500, detail=f"删除任务失败: {str(e)}")
+    finally:
+        db.close()
 
 
 @router.get("/pdf/{task_id}")

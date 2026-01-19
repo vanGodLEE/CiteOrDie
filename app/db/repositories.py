@@ -50,7 +50,8 @@ class TaskRepository:
         message: str = None,
         error: str = None,
         elapsed_seconds: float = None,
-        document_tree: dict = None
+        document_tree: dict = None,
+        quality_report: dict = None
     ) -> Optional[Task]:
         """更新任务状态"""
         task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -84,6 +85,11 @@ class TaskRepository:
         if document_tree is not None:
             import json
             task.document_tree_json = json.dumps(document_tree, ensure_ascii=False)
+        
+        # 保存quality_report（JSON序列化）
+        if quality_report is not None:
+            import json
+            task.quality_report_json = json.dumps(quality_report, ensure_ascii=False)
         
         db.commit()
         return task
@@ -150,6 +156,37 @@ class TaskRepository:
         if status:
             query = query.filter(Task.status == status)
         return query.order_by(Task.created_at.desc()).limit(limit).offset(offset).all()
+    
+    @staticmethod
+    def delete_task(db: Session, task_id: str) -> bool:
+        """
+        删除任务及其所有关联数据
+        
+        Args:
+            db: 数据库会话
+            task_id: 任务ID
+            
+        Returns:
+            是否成功删除
+        """
+        try:
+            task = db.query(Task).filter(Task.task_id == task_id).first()
+            if not task:
+                logger.warning(f"任务不存在: {task_id}")
+                return False
+            
+            # SQLAlchemy会自动级联删除关联的logs、sections、clauses
+            # 因为在模型中定义了 cascade="all, delete-orphan"
+            db.delete(task)
+            db.commit()
+            
+            logger.info(f"✓ 已从数据库删除任务: {task_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"从数据库删除任务失败: {e}")
+            db.rollback()
+            return False
     
     @staticmethod
     def find_by_file_hash(db: Session, file_hash: str) -> Optional[Task]:
