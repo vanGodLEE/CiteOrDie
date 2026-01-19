@@ -1,10 +1,12 @@
 """
 异步分析API - 支持SSE进度推送
 基于PageIndex的PDF文档分析
+支持幂等性：相同文件自动复用计算结果
 """
 
 import json
 import asyncio
+import hashlib
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import quote
@@ -53,7 +55,7 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             toc=[],
             toc_tree=None,
             target_sections=[],
-            requirements=[],
+            clauses=[],
             final_matrix=[],
             processing_start_time=None,
             processing_end_time=None,
@@ -79,7 +81,7 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         from app.db.repositories import (
             TaskRepository,
             SectionRepository,
-            RequirementRepository
+            ClauseRepository
         )
         from app.db.database import SessionLocal
         from app.utils.mineru_coordinate_converter import convert_positions_for_frontend
@@ -101,33 +103,37 @@ async def run_analysis_task(task_id: str, pdf_path: str):
                 SectionRepository.batch_create_sections(db, task_id, sections_data)
             
             # ✅ 转换MinerU坐标为页面坐标（左上原点，单位points，前端直接乘以scale使用）
-            # 批量保存需求矩阵
-            requirements_data = []
-            for req in final_matrix:
+            # 批量保存条款矩阵
+            clauses_data = []
+            for clause in final_matrix:
                 # 转换positions坐标
-                positions = req.positions if hasattr(req, 'positions') else []
+                positions = clause.positions if hasattr(clause, 'positions') else []
                 if positions:
                     try:
                         positions = convert_positions_for_frontend(positions, pdf_path)
-                        logger.debug(f"需求 {req.matrix_id} 坐标已转换为页面坐标（左上原点，单位points）")
+                        logger.debug(f"条款 {clause.matrix_id} 坐标已转换为页面坐标（左上原点，单位points）")
                     except Exception as e:
-                        logger.warning(f"转换需求 {req.matrix_id} 坐标失败: {e}，保留原始坐标")
+                        logger.warning(f"转换条款 {clause.matrix_id} 坐标失败: {e}，保留原始坐标")
                 
-                requirements_data.append({
-                    "matrix_id": req.matrix_id,
-                    "requirement": req.requirement,
-                    "original_text": req.original_text,
-                    "section_id": req.section_id,
-                    "section_title": req.section_title,
-                    "page_number": req.page_number,
-                    "category": req.category if hasattr(req, 'category') else "OTHER",
-                    "response_suggestion": req.response_suggestion,
-                    "risk_warning": req.risk_warning,
-                    "notes": req.notes,
+                clauses_data.append({
+                    "matrix_id": clause.matrix_id,
+                    "type": clause.type,
+                    "actor": clause.actor,
+                    "action": clause.action,
+                    "object": clause.object,
+                    "condition": clause.condition,
+                    "deadline": clause.deadline,
+                    "metric": clause.metric,
+                    "original_text": clause.original_text,
+                    "section_id": clause.section_id,
+                    "section_title": clause.section_title,
+                    "page_number": clause.page_number,
+                    "image_caption": clause.image_caption if hasattr(clause, 'image_caption') else None,
+                    "table_caption": clause.table_caption if hasattr(clause, 'table_caption') else None,
                     "positions": positions  # ✅ 已转换为PDF坐标
                 })
             
-            RequirementRepository.batch_create_requirements(db, task_id, requirements_data)
+            ClauseRepository.batch_create_clauses(db, task_id, clauses_data)
             
         finally:
             db.close()
@@ -166,9 +172,9 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             task_id,
             status="completed",
             progress=100,
-            message=f"分析完成！共提取 {len(final_matrix)} 条需求",
+            message=f"分析完成！共提取 {len(final_matrix)} 条条款",
             result={
-                "requirements_count": len(final_matrix),
+                "clauses_count": len(final_matrix),
                 "document_tree": tree_data  # 保存完整树结构到内存
             },
             document_tree=tree_data  # 持久化到数据库
@@ -187,15 +193,39 @@ async def run_analysis_task(task_id: str, pdf_path: str):
         )
 
 
+def calculate_file_hash(content: bytes) -> str:
+    """
+    计算文件的SHA256哈希值
+    
+    Args:
+        content: 文件内容（字节）
+        
+    Returns:
+        64位十六进制哈希字符串
+    """
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(content)
+    return sha256_hash.hexdigest()
+
+
 @router.post("/analyze")
 async def analyze_tender(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...)
 ):
     """
-    分析PDF文件
+    分析PDF文件（支持幂等性）
     
-    返回task_id，客户端使用task_id订阅SSE进度
+    幂等性策略：
+    1. 计算上传文件的SHA256哈希值
+    2. 检查数据库中是否存在相同哈希的已完成任务
+    3. 如果存在，直接返回已有任务的task_id（reused=true）
+    4. 如果不存在，创建新任务并开始分析（reused=false）
+    
+    返回：
+        - task_id: 任务ID
+        - reused: 是否复用已有结果
+        - message: 提示信息
     """
     # 验证文件类型
     if not file.filename.lower().endswith('.pdf'):
@@ -204,6 +234,60 @@ async def analyze_tender(
             "message": "只支持PDF文件"
         }
     
+    # 读取文件内容
+    content = await file.read()
+    file_size = len(content)
+    
+    # ✅ 计算文件哈希
+    file_hash = calculate_file_hash(content)
+    logger.info(f"文件哈希: {file_hash[:16]}... (完整: {file_hash})")
+    
+    # ✅ 检查是否已存在相同文件的任务（幂等性检查）
+    from app.db.repositories import TaskRepository
+    from app.db.database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        existing_task = TaskRepository.find_by_file_hash(db, file_hash)
+        
+        if existing_task and existing_task.status == "completed":
+            # 找到已完成的任务，直接复用
+            logger.success(f"✅ 复用已有任务: {existing_task.task_id} (文件: {existing_task.file_name})")
+            logger.info(f"   - 完成时间: {existing_task.completed_at}")
+            logger.info(f"   - 条款数: {existing_task.total_clauses}")
+            logger.info(f"   - 耗时: {existing_task.elapsed_seconds:.1f}秒")
+            
+            # 将任务加载到内存（如果还没有）
+            if not TaskManager.get_task(existing_task.task_id):
+                TaskManager.load_completed_task(existing_task.task_id)
+            
+            return {
+                "status": "success",
+                "task_id": existing_task.task_id,
+                "reused": True,
+                "message": f"检测到相同文件，复用已有分析结果（完成于 {existing_task.completed_at.strftime('%Y-%m-%d %H:%M:%S')}）"
+            }
+        
+        elif existing_task and existing_task.status == "running":
+            # 任务正在运行中
+            logger.info(f"⏳ 任务正在运行: {existing_task.task_id}")
+            return {
+                "status": "success",
+                "task_id": existing_task.task_id,
+                "reused": True,
+                "message": "检测到相同文件正在分析中，请等待完成"
+            }
+        
+        else:
+            # 没有找到可复用的任务，或之前的任务失败了
+            if existing_task:
+                logger.info(f"⚠️  历史任务状态为 {existing_task.status}，创建新任务")
+            else:
+                logger.info("🆕 首次上传此文件，创建新任务")
+    
+    finally:
+        db.close()
+    
     # 保存上传的文件
     upload_dir = Path("temp/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -211,16 +295,16 @@ async def analyze_tender(
     file_path = upload_dir / file.filename
     
     with open(file_path, "wb") as f:
-        content = await file.read()
         f.write(content)
     
     logger.info(f"文件已保存: {file_path}")
     
-    # 创建任务
+    # 创建新任务
     task_id = TaskManager.create_task(
         pdf_path=str(file_path),
         file_name=file.filename,
-        file_size=len(content)
+        file_size=file_size,
+        file_hash=file_hash  # ✅ 传递文件哈希
     )
     
     # 上传到MinIO
@@ -252,6 +336,7 @@ async def analyze_tender(
     return {
         "status": "success",
         "task_id": task_id,
+        "reused": False,
         "message": "任务已创建，请使用task_id订阅进度"
     }
 
@@ -313,7 +398,7 @@ async def get_progress(task_id: str):
 @router.get("/task/{task_id}")
 async def get_task_info(task_id: str):
     """
-    获取任务信息（包括最终需求矩阵和文档树）
+    获取任务信息（包括最终条款矩阵和文档树）
     
     重要：无论任务是从内存还是数据库恢复，都能正确返回完整数据
     
@@ -333,36 +418,40 @@ async def get_task_info(task_id: str):
     
     # 如果任务完成，从数据库读取完整数据（支持重启后恢复）
     if task["status"] == "completed":
-        from app.db.repositories import RequirementRepository, TaskRepository
+        from app.db.repositories import ClauseRepository, TaskRepository
         from app.db.database import SessionLocal
         import json
         
         db = SessionLocal()
         try:
-            # 1. 读取需求矩阵（✅ 包含已转换的PDF坐标）
-            requirements_data = RequirementRepository.get_requirements_with_positions(db, task_id)
+            # 1. 读取条款矩阵（✅ 包含已转换的PDF坐标）
+            clauses_data = ClauseRepository.get_clauses_with_positions(db, task_id)
             task_record = TaskRepository.get_task(db, task_id)
             
             # positions已在保存时转换为PDF坐标，直接使用
             matrix = []
-            for req in requirements_data:
+            for clause in clauses_data:
                 matrix.append({
-                    "matrix_id": req["matrix_id"],
-                    "requirement": req["requirement"],
-                    "original_text": req["original_text"],
-                    "section_id": req["section_id"],
-                    "section_title": req["section_title"],
-                    "page_number": req["page_number"],
-                    "category": req["category"] or "OTHER",
-                    "response_suggestion": req["response_suggestion"],
-                    "risk_warning": req["risk_warning"],
-                    "notes": req["notes"],
-                    "positions": req["positions"]  # ✅ 已转换为PDF坐标
+                    "matrix_id": clause["matrix_id"],
+                    "type": clause["type"],
+                    "actor": clause.get("actor"),
+                    "action": clause.get("action"),
+                    "object": clause.get("object"),
+                    "condition": clause.get("condition"),
+                    "deadline": clause.get("deadline"),
+                    "metric": clause.get("metric"),
+                    "original_text": clause["original_text"],
+                    "section_id": clause["section_id"],
+                    "section_title": clause["section_title"],
+                    "page_number": clause["page_number"],
+                    "image_caption": clause.get("image_caption"),
+                    "table_caption": clause.get("table_caption"),
+                    "positions": clause.get("positions", [])  # ✅ 已转换为PDF坐标
                 })
             
-            # 总是设置matrix和requirements_count
+            # 总是设置matrix和clauses_count
             task["matrix"] = matrix
-            task["requirements_count"] = len(matrix)
+            task["clauses_count"] = len(matrix)
             
             # 2. 读取document_tree（优先从内存，再从数据库）
             document_tree = None
@@ -382,7 +471,7 @@ async def get_task_info(task_id: str):
             # ✅ document_tree中的positions已在保存时转换（左上原点，单位points）
             task["document_tree"] = document_tree
             
-            logger.info(f"任务 {task_id}: 返回 {len(matrix)} 条需求")
+            logger.info(f"任务 {task_id}: 返回 {len(matrix)} 条条款")
                 
         finally:
             db.close()
@@ -391,7 +480,7 @@ async def get_task_info(task_id: str):
 
 
 # ✅ 坐标转换已在保存时完成：
-#    - 需求的positions：MinerU归一化坐标(0-1000) → 页面坐标(左上原点，单位points)
+#    - 条款的positions：MinerU归一化坐标(0-1000) → 页面坐标(左上原点，单位points）
 #    - 节点的positions：MinerU归一化坐标(0-1000) → 页面坐标(左上原点，单位points)
 # 前端Canvas可直接使用，只需应用scale：vx = x * scale, vy = y * scale
 
@@ -399,7 +488,7 @@ async def get_task_info(task_id: str):
 @router.get("/download/excel/{task_id}")
 async def download_excel(task_id: str):
     """
-    下载Excel格式的需求矩阵
+    下载Excel格式的条款矩阵
     
     Args:
         task_id: 任务ID
@@ -443,7 +532,7 @@ async def download_excel(task_id: str):
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
                 # 同时提供ASCII后备和UTF-8编码的文件名，确保最大兼容性
-                "Content-Disposition": f"attachment; filename=\"requirement_matrix.xlsx\"; filename*=UTF-8''{encoded_filename}"
+                "Content-Disposition": f"attachment; filename=\"clause_matrix.xlsx\"; filename*=UTF-8''{encoded_filename}"
             }
         )
     except Exception as e:

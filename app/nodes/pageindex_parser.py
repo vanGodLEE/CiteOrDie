@@ -1,6 +1,6 @@
 """
 PageIndex解析节点
-使用PageIndex解析PDF并生成需求树结构
+使用PageIndex解析PDF并生成条款树结构
 """
 
 from typing import Dict, Any
@@ -18,7 +18,7 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
     - state.pdf_path: PDF文件路径
     
     输出：
-    - state.pageindex_document: PageIndex生成的需求树文档
+    - state.pageindex_document: PageIndex生成的条款树文档
     
     工作流程：
     1. 调用PageIndex服务解析PDF
@@ -97,7 +97,7 @@ def pageindex_parser_node(state: TenderAnalysisState) -> Dict[str, Any]:
         if task_id:
             TaskManager.log_progress(
                 task_id,
-                f"✓ 文档结构解析完成，共{len(leaf_nodes)}个章节待提取需求",
+                f"✓ 文档结构解析完成，共{len(leaf_nodes)}个章节待提取条款",
                 30
             )
         

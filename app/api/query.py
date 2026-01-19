@@ -1,7 +1,7 @@
 """
 查询API
 
-提供历史任务、日志、需求的查询接口
+提供历史任务、日志、条款的查询接口
 """
 
 from typing import List, Optional, Union
@@ -11,7 +11,7 @@ from datetime import datetime
 from loguru import logger
 
 from app.db.database import get_db_session
-from app.db.repositories import TaskRepository, TaskLogRepository, SectionRepository, RequirementRepository
+from app.db.repositories import TaskRepository, TaskLogRepository, SectionRepository, ClauseRepository
 
 router = APIRouter(prefix="/api")
 
@@ -27,7 +27,8 @@ class TaskSummary(BaseModel):
     status: str
     progress: float
     total_sections: int
-    total_requirements: int
+    total_clauses: int
+    total_requirements: int  # 向后兼容
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -44,7 +45,8 @@ class TaskDetail(BaseModel):
     current_message: Optional[str]
     error_message: Optional[str]
     total_sections: int
-    total_requirements: int
+    total_clauses: int
+    total_requirements: int  # 向后兼容
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -69,33 +71,37 @@ class SectionItem(BaseModel):
     start_page: int
 
 
-class RequirementItem(BaseModel):
-    """需求条目"""
+class ClauseItem(BaseModel):
+    """条款条目（简化版）"""
     matrix_id: str
-    requirement: str
+    type: str
+    actor: Optional[str] = None
+    action: Optional[str] = None
+    object: Optional[str] = None
     original_text: str
     section_title: str
     page_number: int
-    response_suggestion: str
-    risk_warning: str
-    notes: str
 
 
-class RequirementDetail(BaseModel):
-    """需求详情（包含节点ID和完整信息）"""
+class ClauseDetail(BaseModel):
+    """条款详情（包含节点ID和完整信息）"""
     matrix_id: str
     node_id: str  # 所在节点的ID（即section_id）
     section_title: str
-    requirement: str
+    type: str  # 条款类型
+    actor: Optional[str] = None
+    action: Optional[str] = None
+    object: Optional[str] = None
+    condition: Optional[str] = None
+    deadline: Optional[str] = None
+    metric: Optional[str] = None
     original_text: str
     page_number: int
-    category: str
-    response_suggestion: str
-    risk_warning: str
-    notes: str
     image_caption: Optional[str] = None
     table_caption: Optional[str] = None
     positions: List[List[Union[int, float]]] = []  # ✅ PDF坐标 [[page_idx(int), x0(float), y0(float), x1(float), y1(float)], ...]
+
+
 
 
 # ============================================================================
@@ -124,7 +130,8 @@ def list_tasks(
                 status=t.status,
                 progress=t.progress,
                 total_sections=t.total_sections,
-                total_requirements=t.total_requirements,
+                total_clauses=t.total_clauses or 0,
+                total_requirements=t.total_requirements or 0,
                 created_at=t.created_at,
                 started_at=t.started_at,
                 completed_at=t.completed_at,
@@ -156,7 +163,8 @@ def get_task_detail(task_id: str):
             current_message=task.current_message,
             error_message=task.error_message,
             total_sections=task.total_sections,
-            total_requirements=task.total_requirements,
+            total_clauses=task.total_clauses or 0,
+            total_requirements=task.total_requirements or 0,
             created_at=task.created_at,
             started_at=task.started_at,
             completed_at=task.completed_at,
@@ -208,51 +216,55 @@ def get_task_sections(task_id: str):
         db.close()
 
 
-@router.get("/tasks/{task_id}/requirements", response_model=List[RequirementItem])
-def get_task_requirements(task_id: str):
-    """获取任务提取的需求矩阵"""
+@router.get("/tasks/{task_id}/clauses", response_model=List[ClauseItem])
+def get_task_clauses(task_id: str):
+    """获取任务提取的条款矩阵"""
     db = get_db_session()
     try:
-        requirements = RequirementRepository.get_requirements(db, task_id)
+        clauses = ClauseRepository.get_clauses(db, task_id)
         
         return [
-            RequirementItem(
-                matrix_id=req.matrix_id,
-                requirement=req.requirement,
-                original_text=req.original_text,
-                section_title=req.section_title,
-                page_number=req.page_number,
-                response_suggestion=req.response_suggestion,
-                risk_warning=req.risk_warning,
-                notes=req.notes
+            ClauseItem(
+                matrix_id=clause.matrix_id,
+                type=clause.clause_type,
+                actor=clause.actor,
+                action=clause.action,
+                object=clause.object,
+                original_text=clause.original_text,
+                section_title=clause.section_title,
+                page_number=clause.page_number
             )
-            for req in requirements
+            for clause in clauses
         ]
     finally:
         db.close()
 
 
-@router.get("/tasks/{task_id}/requirements/all", response_model=List[RequirementDetail])
-def get_all_requirements_flat(task_id: str):
+
+
+@router.get("/tasks/{task_id}/clauses/all", response_model=List[ClauseDetail])
+def get_all_clauses_flat(task_id: str):
     """
-    获取任务的所有需求（扁平列表，按文档顺序）
+    获取任务的所有条款（扁平列表，按文档顺序）
     
-    返回所有节点的需求，按页码从上到下排序，每个需求包含：
-    - matrix_id: 需求唯一标识
+    返回所有节点的条款，按页码从上到下排序，每个条款包含：
+    - matrix_id: 条款唯一标识
     - node_id: 所在节点的ID（用于前端定位）
     - section_title: 章节标题
-    - requirement: 需求概述
+    - type: 条款类型
+    - actor: 执行主体
+    - action: 执行动作
+    - object: 作用对象
+    - condition: 触发条件
+    - deadline: 时间要求
+    - metric: 量化指标
     - original_text: 原文
     - page_number: 页码
-    - category: 需求类型
-    - response_suggestion: 应答建议
-    - risk_warning: 风险提示
-    - notes: 备注
     - image_caption: 图片描述（如果有）
     - table_caption: 表格描述（如果有）
     - positions: bbox坐标列表（页面坐标，左上角原点，单位points，前端需乘以scale后使用）
     
-    适用于前端展示完整的需求列表和PDF标注
+    适用于前端展示完整的条款列表和PDF标注
     
     重要：positions已在后端转换为实际页面坐标（左上原点），前端使用时只需：
     1. 计算scale: scale = containerWidth / viewport.width
@@ -266,33 +278,98 @@ def get_all_requirements_flat(task_id: str):
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
         
-        # ✅ 使用新方法：直接获取带positions的需求（已解析JSON）
-        requirements_data = RequirementRepository.get_requirements_with_positions(db, task_id)
+        # ✅ 使用新方法：直接获取带positions的条款（已解析JSON）
+        clauses_data = ClauseRepository.get_clauses_with_positions(db, task_id)
         
         # positions已在保存时转换为页面坐标（左上角原点，单位points）
         result = []
-        for req in requirements_data:
-            result.append(RequirementDetail(
-                matrix_id=req["matrix_id"],
-                node_id=req["section_id"] or "UNKNOWN",
-                section_title=req["section_title"] or "",
-                requirement=req["requirement"],
-                original_text=req["original_text"],
-                page_number=req["page_number"] or 0,
-                category=req["category"] or "OTHER",
-                response_suggestion=req["response_suggestion"] or "",
-                risk_warning=req["risk_warning"] or "",
-                notes=req["notes"] or "",
-                image_caption=req["image_caption"],
-                table_caption=req["table_caption"],
-                positions=req["positions"]  # ✅ 已转换为页面坐标（左上原点，单位points，前端直接乘以scale使用）
+        for clause in clauses_data:
+            result.append(ClauseDetail(
+                matrix_id=clause["matrix_id"],
+                node_id=clause["section_id"] or "UNKNOWN",
+                section_title=clause["section_title"] or "",
+                type=clause["type"],
+                actor=clause.get("actor"),
+                action=clause.get("action"),
+                object=clause.get("object"),
+                condition=clause.get("condition"),
+                deadline=clause.get("deadline"),
+                metric=clause.get("metric"),
+                original_text=clause["original_text"],
+                page_number=clause["page_number"] or 0,
+                image_caption=clause.get("image_caption"),
+                table_caption=clause.get("table_caption"),
+                positions=clause.get("positions", [])  # ✅ 已转换为页面坐标（左上原点，单位points，前端直接乘以scale使用）
             ))
         
-        logger.info(f"返回任务 {task_id} 的 {len(result)} 条需求（扁平列表）")
+        logger.info(f"返回任务 {task_id} 的 {len(result)} 条条款（扁平列表）")
         return result
         
     finally:
         db.close()
+
+
+
+
+@router.get("/clauses/search")
+def search_clauses(
+    keyword: str = Query(..., description="搜索关键词"),
+    task_id: Optional[str] = Query(None, description="限定任务ID"),
+    limit: int = Query(50, le=100, description="返回数量限制")
+):
+    """
+    搜索条款（支持关键词匹配）
+    
+    可用于跨任务搜索相似条款
+    """
+    db = get_db_session()
+    try:
+        clauses = ClauseRepository.search_clauses(
+            db,
+            keyword=keyword,
+            task_id=task_id,
+            limit=limit
+        )
+        
+        return [
+            {
+                "task_id": clause.task_id,
+                "matrix_id": clause.matrix_id,
+                "type": clause.clause_type,
+                "original_text": clause.original_text[:200],  # 截断原文
+                "section_title": clause.section_title,
+                "page_number": clause.page_number
+            }
+            for clause in clauses
+        ]
+    finally:
+        db.close()
+
+
+# ============================================================================
+# 向后兼容接口（保留旧的 API 路径）
+# ============================================================================
+
+@router.get("/tasks/{task_id}/requirements", response_model=List[ClauseItem])
+def get_task_requirements(task_id: str):
+    """
+    获取任务提取的条款矩阵（向后兼容接口）
+    
+    注意：此接口已废弃，请使用 /tasks/{task_id}/clauses
+    内部实际调用 clause 接口
+    """
+    return get_task_clauses(task_id)
+
+
+@router.get("/tasks/{task_id}/requirements/all", response_model=List[ClauseDetail])
+def get_all_requirements_flat(task_id: str):
+    """
+    获取任务的所有条款（向后兼容接口）
+    
+    注意：此接口已废弃，请使用 /tasks/{task_id}/clauses/all
+    内部实际调用 clause 接口
+    """
+    return get_all_clauses_flat(task_id)
 
 
 @router.get("/requirements/search")
@@ -302,30 +379,12 @@ def search_requirements(
     limit: int = Query(50, le=100, description="返回数量限制")
 ):
     """
-    搜索需求（支持关键词匹配）
+    搜索条款（向后兼容接口）
     
-    可用于跨任务搜索相似需求
+    注意：此接口已废弃，请使用 /clauses/search
+    内部实际调用 clause 接口
     """
-    db = get_db_session()
-    try:
-        requirements = RequirementRepository.search_requirements(
-            db,
-            keyword=keyword,
-            task_id=task_id,
-            limit=limit
-        )
-        
-        return [
-            {
-                "task_id": req.task_id,
-                "matrix_id": req.matrix_id,
-                "requirement": req.requirement,
-                "original_text": req.original_text[:200],  # 截断原文
-                "section_title": req.section_title,
-                "page_number": req.page_number
-            }
-            for req in requirements
-        ]
-    finally:
-        db.close()
+    return search_clauses(keyword, task_id, limit)
+
+
 

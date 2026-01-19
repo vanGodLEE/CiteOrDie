@@ -45,10 +45,10 @@ async def startup_event():
     init_db()
     logger.info("✅ 数据库初始化完成")
 
-# 注册异步分析路由
-app.include_router(async_router, tags=["Analysis"])
+# 注册异步分析路由（async_analyze.py没有prefix，所以这里加上）
+app.include_router(async_router, prefix="/api", tags=["Analysis"])
 
-# 注册查询API路由
+# 注册查询API路由（query.py已有prefix="/api"，所以这里不加）
 app.include_router(query_router, tags=["Query"])
 
 # 配置CORS（允许本地HTML文件访问）

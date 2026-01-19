@@ -1,5 +1,5 @@
 """
-Excel导出服务 - 将需求树导出为Excel文件
+Excel导出服务 - 将条款树导出为Excel文件
 """
 
 from typing import List, Tuple, Dict
@@ -8,22 +8,22 @@ from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
 
-from app.core.states import PageIndexDocument, PageIndexNode, RequirementItem
+from app.core.states import PageIndexDocument, PageIndexNode, ClauseItem
 
 
 class ExcelExportService:
-    """需求树Excel导出服务"""
+    """条款树Excel导出服务"""
     
     # 表头定义
     HEADERS = [
         "层级关系",
         "章节标题", 
         "章节概述",
-        "需求ID",
-        "需求",
+        "条款ID",
+        "条款内容",
         "页码",
-        "风险提示",
-        "建议应答方向"
+        "条款类型",
+        "结构化信息"
     ]
     
     # 列宽设置（字符数）
@@ -31,11 +31,11 @@ class ExcelExportService:
         "A": 15,  # 层级关系
         "B": 25,  # 章节标题
         "C": 40,  # 章节概述
-        "D": 20,  # 需求ID
-        "E": 50,  # 需求
+        "D": 20,  # 条款ID
+        "E": 50,  # 条款内容
         "F": 10,  # 页码
-        "G": 40,  # 风险提示
-        "H": 40,  # 建议应答方向
+        "G": 20,  # 条款类型
+        "H": 40,  # 结构化信息
     }
     
     @staticmethod
@@ -44,14 +44,14 @@ class ExcelExportService:
         将PageIndexDocument导出为Excel文件
         
         Args:
-            document: PageIndex文档对象（包含需求树）
+            document: PageIndex文档对象（包含条款树）
             
         Returns:
             BytesIO: Excel文件的字节流
         """
         wb = Workbook()
         ws = wb.active
-        ws.title = "需求矩阵"
+        ws.title = "条款矩阵"
         
         # 1. 写入表头
         ExcelExportService._write_header(ws)
@@ -131,11 +131,11 @@ class ExcelExportService:
         node_title = node.title
         node_summary = node.summary or ""
         
-        # 如果节点有需求，为每个需求创建一行
-        if node.requirements:
+        # 如果节点有条款，为每个条款创建一行
+        if node.clauses:
             first_row = current_row  # 记录起始行
             
-            for req in node.requirements:
+            for req in node.clauses:
                 ExcelExportService._write_requirement_row(
                     ws, 
                     current_row,
@@ -146,8 +146,8 @@ class ExcelExportService:
                 )
                 current_row += 1
             
-            # 如果有多个需求，记录前三列需要合并的范围
-            if len(node.requirements) > 1:
+            # 如果有多个条款，记录前三列需要合并的范围
+            if len(node.clauses) > 1:
                 last_row = current_row - 1
                 merge_ranges.append({
                     'start_row': first_row,
@@ -155,7 +155,7 @@ class ExcelExportService:
                     'columns': [1, 2, 3]  # 列A(1), B(2), C(3) - 层级、标题、概述
                 })
         else:
-            # 如果没有需求，只写入章节信息（需求相关列留空）
+            # 如果没有条款，只写入章节信息（条款相关列留空）
             ExcelExportService._write_section_only_row(
                 ws,
                 current_row,
@@ -185,9 +185,9 @@ class ExcelExportService:
         level: str,
         title: str,
         summary: str,
-        req: RequirementItem
+        req: ClauseItem
     ):
-        """写入包含需求的行"""
+        """写入包含条款的行"""
         border_side = Side(style='thin', color="CCCCCC")
         border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
         
@@ -196,11 +196,11 @@ class ExcelExportService:
             level,                          # 层级关系
             title,                          # 章节标题
             summary,                        # 章节概述
-            req.matrix_id,                  # 需求ID
-            req.requirement,                # 需求
+            req.matrix_id,                  # 条款ID
+            req.original_text[:100] if len(req.original_text) > 100 else req.original_text,  # 条款（截取前100字符）
             req.page_number,                # 页码
-            req.risk_warning,               # 风险提示
-            req.response_suggestion,        # 建议应答方向
+            req.type,                       # 条款类型
+            f"{req.actor or ''} {req.action or ''} {req.object or ''}".strip(),  # 结构化信息
         ]
         
         for col_idx, value in enumerate(data, 1):
@@ -231,20 +231,20 @@ class ExcelExportService:
         title: str,
         summary: str
     ):
-        """写入只有章节信息的行（无需求）"""
+        """写入只有章节信息的行（无条款）"""
         border_side = Side(style='thin', color="CCCCCC")
         border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
         
-        # 浅灰色背景（区分无需求的章节）
+        # 浅灰色背景（区分无条款的章节）
         gray_fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
         
-        # 数据行（需求相关列留空）
+        # 数据行（条款相关列留空）
         data = [
             level,      # 层级关系
             title,      # 章节标题
             summary,    # 章节概述
-            "",         # 需求ID - 空
-            "",         # 需求 - 空
+            "",         # 条款ID - 空
+            "",         # 条款 - 空
             "",         # 页码 - 空
             "",         # 风险提示 - 空
             "",         # 建议应答方向 - 空

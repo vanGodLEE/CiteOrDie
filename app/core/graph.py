@@ -36,9 +36,9 @@ def create_tender_analysis_graph():
     2. mineru_parser: 调用MinerU完整解析PDF，获取图片、表格等完整内容
     3. text_fillers (并行): 基于MinerU的content_list为每个节点并行填充精确原文
     4. aggregator: 汇聚所有text_filler（避免重复触发enrichers）
-    5. enrichers (并行): 为每个叶子节点并行提取需求（文本+视觉模型）
-    6. auditor: 汇总所有需求，生成最终矩阵
-    7. requirement_locator: 为每个需求定位positions（图片/表格→节点positions，文本→智能匹配）
+    5. enrichers (并行): 为每个叶子节点并行提取条款（文本+视觉模型）
+    6. auditor: 汇总所有条款，生成最终矩阵
+    7. requirement_locator: 为每个条款定位positions（图片/表格→节点positions，文本→智能匹配）
     
     性能优化：
     - text_fillers并行执行，大幅提升原文填充速度
@@ -56,7 +56,7 @@ def create_tender_analysis_graph():
     workflow.add_node("aggregator", aggregator_node)
     workflow.add_node("enricher", pageindex_enricher_node)
     workflow.add_node("auditor", auditor_node)
-    workflow.add_node("requirement_locator", requirement_locator_node)  # 新增：需求位置定位
+    workflow.add_node("requirement_locator", requirement_locator_node)  # 新增：条款位置定位
     
     # 连接边
     workflow.add_edge(START, "pageindex_parser")
@@ -74,7 +74,7 @@ def create_tender_analysis_graph():
     # 所有enricher完成后，汇总到auditor
     workflow.add_edge("enricher", "auditor")
     
-    # auditor完成后，进行需求位置定位
+    # auditor完成后，进行条款位置定位
     workflow.add_edge("auditor", "requirement_locator")
     
     # requirement_locator完成后，结束
@@ -82,7 +82,7 @@ def create_tender_analysis_graph():
     
     # 编译图
     graph = workflow.compile()
-    logger.info("招标分析工作流图构建完成（完整版：PageIndex+MinerU+需求定位）")
+    logger.info("招标分析工作流图构建完成（完整版：PageIndex+MinerU+条款定位）")
     
     return graph
 
@@ -226,7 +226,7 @@ def route_to_enrichers(state: TenderAnalysisState) -> List[Send]:
         logger.warning("未找到叶子节点，无法路由到enrichers")
         return []
     
-    logger.info(f"准备并行提取 {len(leaf_nodes)} 个叶子节点的需求（文本+视觉）")
+    logger.info(f"准备并行提取 {len(leaf_nodes)} 个叶子节点的条款（文本+视觉）")
     if mineru_output_dir:
         logger.info(f"  MinerU输出目录: {mineru_output_dir}")
     else:
@@ -286,7 +286,7 @@ def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
         "toc": [],
         "toc_tree": None,
         "target_sections": [],
-        "requirements": [],
+        "clauses": [],
         "final_matrix": [],
         "processing_start_time": time.time(),
         "processing_end_time": None,
@@ -299,15 +299,15 @@ def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
         
         # 记录结果
         processing_time = final_state.get("processing_end_time", time.time()) - final_state.get("processing_start_time", 0)
-        requirements_count = len(final_state.get("final_matrix", []))
+        clauses_count = len(final_state.get("final_matrix", []))
         
         logger.info(f"✓ 分析完成")
         logger.info(f"  - 处理时间: {processing_time:.2f}秒")
-        logger.info(f"  - 需求总数: {requirements_count}条")
+        logger.info(f"  - 条款总数: {clauses_count}条")
         
         return {
             "status": "success",
-            "requirements_count": requirements_count,
+            "clauses_count": clauses_count,
             "matrix": final_state.get("final_matrix", []),
             "processing_time": processing_time,
             "pageindex_document": final_state.get("pageindex_document")
@@ -318,7 +318,7 @@ def run_analysis(pdf_path: str, task_id: str = None) -> Dict[str, Any]:
         return {
             "status": "error",
             "error_message": str(e),
-            "requirements_count": 0,
+            "clauses_count": 0,
             "matrix": [],
             "processing_time": 0
         }

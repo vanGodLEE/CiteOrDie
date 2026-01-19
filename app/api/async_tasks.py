@@ -49,6 +49,7 @@ class TaskManager:
         file_name: str = "unknown",
         file_size: int = 0,
         pdf_path: str = "",
+        file_hash: str = None,
         use_mock: bool = False
     ) -> str:
         """创建新任务"""
@@ -80,13 +81,14 @@ class TaskManager:
                 file_name=file_name,
                 file_size=file_size,
                 pdf_path=pdf_path,
+                file_hash=file_hash,
                 use_mock=use_mock
             )
             db.close()
         except Exception as e:
             logger.error(f"创建任务时数据库写入失败: {e}")
         
-        logger.info(f"创建任务: {task_id}")
+        logger.info(f"创建任务: {task_id} (文件哈希: {file_hash[:16] if file_hash else 'N/A'}...)")
         return task_id
     
     @staticmethod
@@ -240,4 +242,53 @@ class TaskManager:
         if task_id in task_store:
             del task_store[task_id]
             logger.info(f"清理任务缓存: {task_id}")
+    
+    @staticmethod
+    def load_completed_task(task_id: str):
+        """
+        将已完成的任务加载到内存
+        
+        用于幂等性场景：当用户上传相同文件时，需要将历史任务加载到内存
+        以便前端能够正常订阅SSE和查询结果
+        
+        Args:
+            task_id: 任务ID
+        """
+        # 先检查内存中是否已存在
+        if task_id in task_store:
+            logger.debug(f"任务已在内存中: {task_id}")
+            return
+        
+        # 从数据库加载
+        try:
+            db = get_db_session()
+            try:
+                task_record = TaskRepository.get_task(db, task_id)
+                if not task_record:
+                    logger.warning(f"任务不存在于数据库: {task_id}")
+                    return
+                
+                # 转换为内存格式
+                task_dict = {
+                    "task_id": task_record.task_id,
+                    "status": task_record.status,
+                    "progress": task_record.progress,
+                    "message": task_record.current_message or "任务已完成",
+                    "result": None,
+                    "error": task_record.error_message,
+                    "created_at": task_record.created_at,
+                    "updated_at": task_record.completed_at or task_record.created_at,
+                    "start_time": task_record.started_at,
+                    "elapsed_seconds": task_record.elapsed_seconds or 0,
+                    "logs": []
+                }
+                
+                # 加载到内存
+                task_store[task_id] = task_dict
+                logger.info(f"✅ 已将任务加载到内存: {task_id} [状态: {task_record.status}]")
+                
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"加载任务失败: {e}")
 

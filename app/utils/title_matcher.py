@@ -296,7 +296,7 @@ class TitleMatcher:
             
             elif content_type == "table":
                 # 表格转换为文本格式（caption + table_body文本）
-                # 同时保留img_path用于后续的需求定位
+                # 同时保留img_path用于后续的条款定位
                 caption = content.get("table_caption", [])
                 table_body = content.get("table_body", "")
                 img_path = content.get("img_path", "")
@@ -304,12 +304,12 @@ class TitleMatcher:
                 # 构建表格文本
                 table_text_parts = []
                 
-                # 1. 添加标题（包含img_path标识，用于需求定位）
+                # 1. 添加标题（包含img_path标识，用于条款定位）
                 if caption:
                     caption_text = " ".join(caption)
                     if img_path:
                         # 格式：【表格：img_path】caption
-                        # img_path用于需求定位器找到表格的bbox
+                        # img_path用于条款定位器找到表格的bbox
                         table_text_parts.append(f"【表格：{img_path}】{caption_text}")
                     else:
                         table_text_parts.append(f"【表格】{caption_text}")

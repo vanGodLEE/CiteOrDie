@@ -5,7 +5,7 @@
 1. Task - 任务主表
 2. TaskLog - 任务日志表（SSE消息）
 3. Section - 选中的章节表
-4. Requirement - 需求矩阵表
+4. Clause - 条款矩阵表
 """
 
 from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Index
@@ -29,6 +29,7 @@ class Task(Base):
     # 文件信息
     file_name = Column(String(255), nullable=False, comment="原始文件名")
     file_size = Column(Integer, comment="文件大小（字节）")
+    file_hash = Column(String(64), index=True, comment="文件SHA256哈希值，用于幂等性检查")
     pdf_path = Column(String(500), comment="PDF存储路径")
     minio_url = Column(String(500), comment="MinIO存储URL")
     use_mock = Column(Integer, default=0, comment="是否使用Mock数据 0-否 1-是")
@@ -41,7 +42,8 @@ class Task(Base):
     
     # 统计信息
     total_sections = Column(Integer, default=0, comment="筛选出的章节数")
-    total_requirements = Column(Integer, default=0, comment="提取的需求总数")
+    total_clauses = Column(Integer, default=0, comment="提取的条款总数")
+    total_requirements = Column(Integer, default=0, comment="提取的条款总数（向后兼容字段，实际存储条款数）")
     
     # 分析结果（JSON存储）
     document_tree_json = Column(Text, comment="PageIndex文档树结构（JSON格式）")
@@ -55,12 +57,13 @@ class Task(Base):
     # 关联关系
     logs = relationship("TaskLog", back_populates="task", cascade="all, delete-orphan")
     sections = relationship("Section", back_populates="task", cascade="all, delete-orphan")
-    requirements = relationship("Requirement", back_populates="task", cascade="all, delete-orphan")
+    clauses = relationship("Clause", back_populates="task", cascade="all, delete-orphan")
     
     # 索引
     __table_args__ = (
         Index("idx_task_status", "status"),
         Index("idx_task_created_at", "created_at"),
+        Index("idx_task_file_hash", "file_hash"),
     )
     
     def __repr__(self):
@@ -144,14 +147,15 @@ class Section(Base):
         return f"<Section {self.section_id} {self.title}>"
 
 
-class Requirement(Base):
+class Clause(Base):
     """
-    需求表（增强版 - 支持视觉内容和位置信息）
+    可执行条款表（Actionable Clauses）
     
-    存储提取的需求矩阵，支持后续查询和复用
-    包含图片和表格的分析描述，以及PDF标注所需的bbox坐标
+    支持从多种文档类型中提取结构化条款：标书、合同、合规制度、SOP、标准规范、政策文件等
+    包含条款的结构化字段（type, actor, action, object, condition, deadline, metric）
+    以及视觉内容和位置信息
     """
-    __tablename__ = "requirements"
+    __tablename__ = "clauses"
     
     # 主键
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -159,40 +163,47 @@ class Requirement(Base):
     # 外键
     task_id = Column(String(36), ForeignKey("tasks.task_id"), nullable=False)
     
-    # 需求标识
-    matrix_id = Column(String(50), nullable=False, comment="需求唯一ID")
+    # 条款标识
+    matrix_id = Column(String(50), nullable=False, comment="条款唯一ID")
     section_id = Column(String(50), comment="章节编号")
     section_title = Column(String(500), comment="章节标题")
     page_number = Column(Integer, comment="页码")
     
-    # 需求内容（核心9字段）
-    requirement = Column(Text, nullable=False, comment="需求内容")
-    original_text = Column(Text, nullable=False, comment="原文")
-    category = Column(String(20), default="OTHER", comment="需求类型：SOLUTION/QUALIFICATION/BUSINESS/FORMAT/PROCESS/OTHER")
-    response_suggestion = Column(Text, comment="应答方向")
-    risk_warning = Column(Text, comment="风险提示")
-    notes = Column(Text, comment="备注")
+    # 条款结构化字段（新增）
+    clause_type = Column(String(20), nullable=False, comment="条款类型：obligation/requirement/prohibition/deliverable/deadline/penalty/definition")
+    actor = Column(String(100), comment="执行主体：supplier/buyer/system/organization/role")
+    action = Column(String(100), comment="执行动作：submit/provide/ensure/record/comply/禁止...")
+    object = Column(String(200), comment="作用对象：document/feature/KPI/material")
+    condition = Column(Text, comment="触发条件：if/when/unless等条件描述")
+    deadline = Column(String(200), comment="时间要求：具体日期、相对时间、周期性要求")
+    metric = Column(String(200), comment="量化指标：具体数值、范围、比较运算符")
     
-    # 视觉扩展字段（2个字段）
+    # 原文内容
+    original_text = Column(Text, nullable=False, comment="条款原文")
+    
+    # 视觉扩展字段
     image_caption = Column(Text, comment="图片内容描述（视觉模型分析结果）")
     table_caption = Column(Text, comment="表格内容描述（表格结构化数据）")
     
-    # ✅ 新增：位置信息（JSON格式存储bbox坐标列表）
+    # 位置信息（JSON格式存储bbox坐标列表）
     positions_json = Column(Text, comment="bbox坐标列表（JSON格式）：[[page, x1, y1, x2, y2], ...]，用于PDF标注")
     
     # 时间戳
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     
     # 关联关系
-    task = relationship("Task", back_populates="requirements")
+    task = relationship("Task", back_populates="clauses")
     
     # 索引（支持全文搜索和多维度查询）
     __table_args__ = (
-        Index("idx_req_task_id", "task_id"),
-        Index("idx_req_matrix_id", "matrix_id"),
-        Index("idx_req_section_id", "section_id"),
+        Index("idx_clause_task_id", "task_id"),
+        Index("idx_clause_matrix_id", "matrix_id"),
+        Index("idx_clause_section_id", "section_id"),
+        Index("idx_clause_type", "clause_type"),
     )
     
     def __repr__(self):
-        return f"<Requirement {self.matrix_id} {self.requirement[:30]}>"
+        return f"<Clause {self.matrix_id} [{self.clause_type}] {self.original_text[:30]}>"
+
+
 

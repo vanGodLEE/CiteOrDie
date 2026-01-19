@@ -13,56 +13,80 @@ import operator
 
 
 # ============================================================================
-# 核心业务模型 - 需求条款
+# 核心业务模型 - 可执行条款
 # ============================================================================
 
-class RequirementItem(BaseModel):
+class ClauseItem(BaseModel):
     """
-    需求条款模型（增强版 - 支持视觉内容和位置定位）
+    可执行条款模型（Actionable Clauses）
     
-    核心字段（9个基础字段）：
-    1. 需求ID - 自动生成
-    2. 需求 - 提取的需求内容
-    3. 原文 - 对应原文
-    4. 章节 - 对应的章节
-    5. 页码 - 对应的页码
-    6. 类型 - 需求类型分类
-    7. 应答方向 - AI生成的建议
-    8. 风险提示 - AI生成的风险提示
-    9. 备注 - AI生成的备注
+    适用范围：标书、合同、合规制度、SOP、标准规范、政策文件等
     
-    视觉扩展字段（3个字段）：
-    10. image_caption - 图片分析描述
-    11. table_caption - 表格分析描述
-    12. img_path - 图片/表格的文件路径（用于精确定位）
+    核心结构化字段：
+    1. type - 条款类型
+    2. actor - 执行主体
+    3. action - 执行动作
+    4. object - 作用对象
+    5. condition - 触发条件
+    6. deadline - 时间要求
+    7. metric - 量化指标
     
-    位置定位字段（1个字段）：
-    13. positions - 需求原文在PDF中的bbox坐标
+    基础信息字段：
+    8. matrix_id - 条款唯一ID
+    9. original_text - 原文
+    10. section_id - 章节编号
+    11. section_title - 章节标题
+    12. page_number - 页码
+    13. image_caption - 图片描述（视觉内容）
+    14. table_caption - 表格描述（表格内容）
+    15. positions - PDF位置坐标
     """
     
-    # 核心字段
-    matrix_id: str = Field(..., description="需求唯一ID，格式：{section_id}-REQ-{序号}")
-    requirement: str = Field(..., description="提取的需求内容，简明扼要")
-    original_text: str = Field(..., description="需求原文，必须是精确摘录")
+    # 条款结构化字段（新增）
+    type: str = Field(
+        ...,
+        description="条款类型：obligation(义务)|requirement(需求)|prohibition(禁止)|deliverable(交付物)|deadline(截止时间)|penalty(惩罚)|definition(定义)"
+    )
+    actor: Optional[str] = Field(
+        None,
+        description="执行主体：supplier(供应商)|buyer(采购方)|system(系统)|organization(组织)|role(角色名称)|其他"
+    )
+    action: Optional[str] = Field(
+        None,
+        description="执行动作：submit(提交)|provide(提供)|ensure(确保)|record(记录)|comply(遵守)|禁止...|其他动词"
+    )
+    object: Optional[str] = Field(
+        None,
+        description="作用对象：document(文档)|feature(功能)|KPI(指标)|material(材料)|其他名词"
+    )
+    condition: Optional[str] = Field(
+        None,
+        description="触发条件：if/when/unless等条件描述"
+    )
+    deadline: Optional[str] = Field(
+        None,
+        description="时间要求：具体日期、相对时间（如'合同签订后30天内'）、周期性要求"
+    )
+    metric: Optional[str] = Field(
+        None,
+        description="量化指标：具体数值、范围、比较运算符（>=, <=, range等）"
+    )
+    
+    # 基础信息字段（保留原有硬性字段）
+    matrix_id: str = Field(..., description="条款唯一ID，格式：{section_id}-CLS-{序号}")
+    original_text: str = Field(..., description="条款原文，精确摘录")
     section_id: str = Field(..., description="章节编号")
     section_title: str = Field(..., description="章节标题")
     page_number: int = Field(..., description="PDF页码")
-    category: str = Field(
-        default="OTHER",
-        description="需求类型：SOLUTION(技术/服务方案)|QUALIFICATION(资质)|BUSINESS(商务)|FORMAT(格式)|PROCESS(流程)|OTHER(其他/不确定)"
-    )
-    response_suggestion: str = Field(..., description="应答方向建议")
-    risk_warning: str = Field(..., description="风险提示")
-    notes: str = Field(..., description="备注")
     
     # 视觉扩展字段
     image_caption: Optional[str] = Field(
         None,
-        description="图片内容描述（如果需求来自图片，则包含视觉模型的分析结果）"
+        description="图片内容描述（如果条款来自图片，则包含视觉模型的分析结果）"
     )
     table_caption: Optional[str] = Field(
         None,
-        description="表格内容描述（如果需求来自表格，则包含表格结构化数据）"
+        description="表格内容描述（如果条款来自表格，则包含表格结构化数据）"
     )
     img_path: Optional[str] = Field(
         None,
@@ -72,21 +96,23 @@ class RequirementItem(BaseModel):
     # 位置定位字段
     positions: List[List[int]] = Field(
         default_factory=list,
-        description="需求对应原文的bbox坐标列表，格式：[[page_idx, x1, y1, x2, y2], ...]（MinerU 0-based索引）"
+        description="条款对应原文的bbox坐标列表，格式：[[page_idx, x1, y1, x2, y2], ...]（MinerU 0-based索引）"
     )
 
 
+
+
 # ============================================================================
-# PageIndex相关模型（需求树）
+# PageIndex相关模型（条款树）
 # ============================================================================
 
 class PageIndexNode(BaseModel):
     """
-    PageIndex的节点模型（递归结构） + 需求字段
+    PageIndex的节点模型（递归结构） + 条款字段
     
-    这是"需求树"的核心模型：
+    这是"条款树"的核心模型：
     - 继承PageIndex的原始结构（title, start_index, end_index, summary等）
-    - 添加requirements字段，每个节点都可以包含需求
+    - 添加clauses字段，每个节点都可以包含条款
     """
     # PageIndex原始字段
     node_id: Optional[str] = Field(None, description="PageIndex生成的节点ID，如 '0001', '0002'")
@@ -101,7 +127,7 @@ class PageIndexNode(BaseModel):
     nodes: List[PageIndexNode] = Field(default_factory=list, description="子节点列表")
     
     # **新增：精确原文字段**
-    original_text: Optional[str] = Field(None, description="精确提取的原文内容（行级别，用于需求提取）")
+    original_text: Optional[str] = Field(None, description="精确提取的原文内容（行级别，用于条款提取）")
     
     # **新增：bbox坐标字段**
     positions: List[List[int]] = Field(
@@ -109,8 +135,9 @@ class PageIndexNode(BaseModel):
         description="原文内容的bbox坐标列表，格式：[[page_idx, x1, y1, x2, y2], ...]"
     )
     
-    # **关键扩展：需求字段**
-    requirements: List[RequirementItem] = Field(default_factory=list, description="该节点的需求列表")
+    # **关键扩展：条款字段**
+    clauses: List[ClauseItem] = Field(default_factory=list, description="该节点的条款列表")
+    
     
     # 辅助字段
     path: Optional[str] = Field(None, description="节点路径，如 '第一章/1.1 技术要求'")
@@ -119,12 +146,12 @@ class PageIndexNode(BaseModel):
         """判断是否为叶子节点"""
         return len(self.nodes) == 0
     
-    def get_all_requirements_recursive(self) -> List[RequirementItem]:
-        """递归获取当前节点及所有子节点的需求"""
-        all_reqs = list(self.requirements)
+    def get_all_clauses_recursive(self) -> List[ClauseItem]:
+        """递归获取当前节点及所有子节点的条款"""
+        all_clauses = list(self.clauses)
         for child in self.nodes:
-            all_reqs.extend(child.get_all_requirements_recursive())
-        return all_reqs
+            all_clauses.extend(child.get_all_clauses_recursive())
+        return all_clauses
     
     def get_leaf_nodes(self) -> List[PageIndexNode]:
         """递归获取所有叶子节点"""
@@ -153,9 +180,9 @@ class PageIndexNode(BaseModel):
             pass
         return None
     
-    def count_total_requirements(self) -> int:
-        """统计该节点及所有子节点的总需求数"""
-        return len(self.get_all_requirements_recursive())
+    def count_total_clauses(self) -> int:
+        """统计该节点及所有子节点的总条款数"""
+        return len(self.get_all_clauses_recursive())
 
 
 class PageIndexDocument(BaseModel):
@@ -173,11 +200,11 @@ class PageIndexDocument(BaseModel):
             leaves.extend(root_node.get_leaf_nodes())
         return leaves
     
-    def count_total_requirements(self) -> int:
-        """统计整个文档的总需求数"""
+    def count_total_clauses(self) -> int:
+        """统计整个文档的总条款数"""
         total = 0
         for root_node in self.structure:
-            total += root_node.count_total_requirements()
+            total += root_node.count_total_clauses()
         return total
 
 
@@ -194,8 +221,8 @@ class TenderAnalysisState(TypedDict):
     2. PageIndex Parser: 解析生成 pageindex_document（包含树结构）
     3. MinerU Parser: 完整解析PDF，生成 mineru_content_list（包含图片、表格）
     4. Text Filler (并行): 基于content_list为每个节点填充original_text
-    5. Enricher (并行): 遍历叶子节点，提取需求（文本+视觉）
-    6. Auditor: 收集所有节点的需求，生成 final_matrix
+    5. Enricher (并行): 遍历叶子节点，提取条款（文本+视觉）
+    6. Auditor: 收集所有节点的条款，生成 final_matrix
     """
     # 输入
     pdf_path: str
@@ -203,7 +230,7 @@ class TenderAnalysisState(TypedDict):
     task_id: Optional[str]  # 任务ID，用于进度更新
     
     # PageIndex解析结果
-    pageindex_document: Optional[PageIndexDocument]  # PageIndex生成的需求树文档
+    pageindex_document: Optional[PageIndexDocument]  # PageIndex生成的条款树文档
     
     # MinerU解析结果（新增）
     mineru_result: Optional[Dict[str, Any]]  # MinerU完整解析结果
@@ -218,10 +245,10 @@ class TenderAnalysisState(TypedDict):
     target_sections: List
     
     # Extractors输出（使用operator.add支持并行追加）
-    requirements: Annotated[List[RequirementItem], operator.add]
+    clauses: Annotated[List[ClauseItem], operator.add]
     
     # Auditor输出
-    final_matrix: List[RequirementItem]
+    final_matrix: List[ClauseItem]
     
     # 元数据
     processing_start_time: Optional[float]
@@ -250,7 +277,7 @@ class SectionState(TypedDict):
     section_plan: Optional[Any]
     
     # Worker处理完后返回的结果
-    requirements: List[RequirementItem]
+    clauses: List[ClauseItem]
 
 
 # ============================================================================
@@ -259,13 +286,13 @@ class SectionState(TypedDict):
 
 def create_matrix_id(section_id: str, sequence: int) -> str:
     """
-    生成需求矩阵ID
+    生成条款矩阵ID
     
     Args:
         section_id: 章节编号，如 "3.1.2"
         sequence: 序号（1-based）
         
     Returns:
-        格式化的ID，如 "3.1.2-REQ-001"
+        格式化的ID，如 "3.1.2-CLS-001"
     """
-    return f"{section_id}-REQ-{sequence:03d}"
+    return f"{section_id}-CLS-{sequence:03d}"

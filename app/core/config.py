@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     
     extractor_model: str = Field(
         default="deepseek:deepseek-chat",
-        description="Enricher节点使用的模型（需求提取）"
+        description="Enricher节点使用的模型（条款提取）"
     )
     
     auditor_model: str = Field(
@@ -159,7 +159,7 @@ class Settings(BaseSettings):
     )
     confidence_threshold: float = Field(
         default=0.5,
-        description="需求提取的最低置信度阈值"
+        description="条款提取的最低置信度阈值"
     )
     similarity_threshold: float = Field(
         default=0.85,

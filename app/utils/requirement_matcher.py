@@ -1,7 +1,7 @@
 """
-需求原文匹配器 - RequirementTextMatcher
+条款原文匹配器 - RequirementTextMatcher
 
-为需求的original_text在节点的content_list中查找对应的positions
+为条款的original_text在节点的content_list中查找对应的positions
 
 核心特点：
 1. 多级匹配策略（精确→相似度→子串→关键词）
@@ -16,7 +16,7 @@ import re
 
 
 class RequirementTextMatcher:
-    """需求原文匹配器"""
+    """条款原文匹配器"""
     
     # 匹配策略阈值
     SIMILARITY_THRESHOLD = 0.85  # 相似度匹配阈值
@@ -29,20 +29,20 @@ class RequirementTextMatcher:
         node_positions: List[List[int]]
     ) -> List[List[int]]:
         """
-        在节点的content_list中查找需求原文对应的positions
+        在节点的content_list中查找条款原文对应的positions
         
         Args:
-            requirement_text: 需求的original_text（LLM生成，可能有偏差）
+            requirement_text: 条款的original_text（LLM生成，可能有偏差）
             node_content_list: 节点对应的content列表（已通过positions筛选）
             node_positions: 节点的positions列表（用于验证）
         
         Returns:
-            需求的positions列表，格式：[[page_idx, x1, y1, x2, y2], ...]
+            条款的positions列表，格式：[[page_idx, x1, y1, x2, y2], ...]
         """
         if not requirement_text or not node_content_list:
             return []
         
-        logger.debug(f"开始匹配需求原文: {requirement_text[:50]}...")
+        logger.debug(f"开始匹配条款原文: {requirement_text[:50]}...")
         logger.debug(f"搜索范围: {len(node_content_list)} 个content节点")
         
         # 策略1：精确匹配（归一化后完全一致）
@@ -63,7 +63,7 @@ class RequirementTextMatcher:
             logger.debug(f"✓ 策略2成功（相似度匹配）: 找到 {len(positions)} 个位置")
             return positions
         
-        # 策略3：子串匹配（需求文本是节点文本的子串）
+        # 策略3：子串匹配（条款文本是节点文本的子串）
         positions = RequirementTextMatcher._substring_match(
             requirement_text, 
             node_content_list
@@ -176,11 +176,11 @@ class RequirementTextMatcher:
         content_list: List[Dict[str, Any]]
     ) -> List[List[int]]:
         """
-        策略3：子串匹配（需求文本是内容的子串）
+        策略3：子串匹配（条款文本是内容的子串）
         
         适用场景：
         - LLM截取了部分原文
-        - 原文较长，需求只引用了一部分
+        - 原文较长，条款只引用了一部分
         
         支持类型：
         - type="text": 匹配text字段
@@ -245,7 +245,7 @@ class RequirementTextMatcher:
         
         适用场景：
         - LLM改写了原文
-        - 需求是原文的总结
+        - 条款是原文的总结
         
         支持类型：
         - type="text": 匹配text字段

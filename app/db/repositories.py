@@ -9,7 +9,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from loguru import logger
 
-from app.db.models import Task, TaskLog, Section, Requirement
+from app.db.models import Task, TaskLog, Section, Clause
 
 
 class TaskRepository:
@@ -22,6 +22,7 @@ class TaskRepository:
         file_name: str,
         file_size: int = 0,
         pdf_path: str = "",
+        file_hash: str = None,
         use_mock: bool = False
     ) -> Task:
         """创建新任务"""
@@ -29,6 +30,7 @@ class TaskRepository:
             task_id=task_id,
             file_name=file_name,
             file_size=file_size,
+            file_hash=file_hash,
             pdf_path=pdf_path,
             use_mock=1 if use_mock else 0,
             status="pending",
@@ -91,7 +93,8 @@ class TaskRepository:
         db: Session,
         task_id: str,
         total_sections: int = None,
-        total_requirements: int = None
+        total_clauses: int = None,
+        total_requirements: int = None  # 向后兼容
     ) -> Optional[Task]:
         """更新任务统计信息"""
         task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -101,8 +104,11 @@ class TaskRepository:
         if total_sections is not None:
             task.total_sections = total_sections
         
-        if total_requirements is not None:
-            task.total_requirements = total_requirements
+        # 优先使用 total_clauses，如果没有则使用 total_requirements（向后兼容）
+        clauses_count = total_clauses if total_clauses is not None else total_requirements
+        if clauses_count is not None:
+            task.total_clauses = clauses_count
+            task.total_requirements = clauses_count  # 同时更新向后兼容字段
         
         db.commit()
         return task
@@ -144,6 +150,44 @@ class TaskRepository:
         if status:
             query = query.filter(Task.status == status)
         return query.order_by(Task.created_at.desc()).limit(limit).offset(offset).all()
+    
+    @staticmethod
+    def find_by_file_hash(db: Session, file_hash: str) -> Optional[Task]:
+        """
+        根据文件哈希查找任务（用于幂等性检查）
+        
+        优先返回状态为 completed 的任务
+        如果没有 completed 任务，返回最新的任务
+        
+        Args:
+            db: 数据库会话
+            file_hash: 文件SHA256哈希值
+            
+        Returns:
+            Task对象或None
+        """
+        if not file_hash:
+            return None
+        
+        # 1. 优先查找已完成的任务
+        completed_task = db.query(Task).filter(
+            Task.file_hash == file_hash,
+            Task.status == "completed"
+        ).order_by(Task.completed_at.desc()).first()
+        
+        if completed_task:
+            logger.info(f"找到已完成的任务: {completed_task.task_id} (文件哈希: {file_hash[:16]}...)")
+            return completed_task
+        
+        # 2. 如果没有已完成的，返回最新的任务（可能正在运行或失败）
+        latest_task = db.query(Task).filter(
+            Task.file_hash == file_hash
+        ).order_by(Task.created_at.desc()).first()
+        
+        if latest_task:
+            logger.info(f"找到历史任务: {latest_task.task_id} [状态: {latest_task.status}]")
+        
+        return latest_task
 
 
 class TaskLogRepository:
@@ -224,108 +268,116 @@ class SectionRepository:
         ).order_by(Section.priority).all()
 
 
-class RequirementRepository:
-    """需求数据访问"""
+class ClauseRepository:
+    """条款数据访问"""
     
     @staticmethod
-    def batch_create_requirements(
+    def batch_create_clauses(
         db: Session,
         task_id: str,
-        requirements_data: List[Dict[str, Any]]
-    ) -> List[Requirement]:
-        """批量创建需求（支持positions）"""
+        clauses_data: List[Dict[str, Any]]
+    ) -> List[Clause]:
+        """批量创建条款（支持positions）"""
         import json
-        requirements = []
-        for data in requirements_data:
+        clauses = []
+        for data in clauses_data:
             # ✅ 处理positions：如果是list，转为JSON字符串
             positions = data.get("positions")
             positions_json = None
             if positions and isinstance(positions, list):
                 positions_json = json.dumps(positions)
             
-            req = Requirement(
+            clause = Clause(
                 task_id=task_id,
                 matrix_id=data.get("matrix_id"),
                 section_id=data.get("section_id"),
                 section_title=data.get("section_title"),
                 page_number=data.get("page_number"),
-                requirement=data.get("requirement"),
+                clause_type=data.get("type", "requirement"),  # 新字段
+                actor=data.get("actor"),  # 新字段
+                action=data.get("action"),  # 新字段
+                object=data.get("object"),  # 新字段
+                condition=data.get("condition"),  # 新字段
+                deadline=data.get("deadline"),  # 新字段
+                metric=data.get("metric"),  # 新字段
                 original_text=data.get("original_text"),
-                category=data.get("category", "OTHER"),
-                response_suggestion=data.get("response_suggestion"),
-                risk_warning=data.get("risk_warning"),
-                notes=data.get("notes"),
+                image_caption=data.get("image_caption"),
+                table_caption=data.get("table_caption"),
                 positions_json=positions_json,  # ✅ 保存positions
                 created_at=datetime.now()
             )
-            requirements.append(req)
+            clauses.append(clause)
         
-        db.add_all(requirements)
+        db.add_all(clauses)
         db.commit()
-        logger.info(f"数据库：保存 {len(requirements)} 条需求（含positions）")
-        return requirements
+        logger.info(f"数据库：保存 {len(clauses)} 条条款（含positions）")
+        return clauses
     
     @staticmethod
-    def get_requirements(db: Session, task_id: str) -> List[Requirement]:
-        """获取任务的所有需求（按文档顺序排列）"""
-        return db.query(Requirement).filter(
-            Requirement.task_id == task_id
-        ).order_by(Requirement.page_number, Requirement.id).all()
+    def get_clauses(db: Session, task_id: str) -> List[Clause]:
+        """获取任务的所有条款（按文档顺序排列）"""
+        return db.query(Clause).filter(
+            Clause.task_id == task_id
+        ).order_by(Clause.page_number, Clause.id).all()
     
     @staticmethod
-    def get_requirements_with_positions(db: Session, task_id: str) -> List[Dict[str, Any]]:
+    def get_clauses_with_positions(db: Session, task_id: str) -> List[Dict[str, Any]]:
         """
-        获取任务的所有需求（含positions，解析为字典）
+        获取任务的所有条款（含positions，解析为字典）
         
         返回字典列表，positions字段已从JSON解析为Python list
         """
         import json
-        requirements = RequirementRepository.get_requirements(db, task_id)
+        clauses = ClauseRepository.get_clauses(db, task_id)
         
         result = []
-        for req in requirements:
-            req_dict = {
-                "id": req.id,
-                "matrix_id": req.matrix_id,
-                "section_id": req.section_id,
-                "section_title": req.section_title,
-                "page_number": req.page_number,
-                "requirement": req.requirement,
-                "original_text": req.original_text,
-                "category": req.category,
-                "response_suggestion": req.response_suggestion,
-                "risk_warning": req.risk_warning,
-                "notes": req.notes,
-                "image_caption": req.image_caption,
-                "table_caption": req.table_caption,
+        for clause in clauses:
+            clause_dict = {
+                "id": clause.id,
+                "matrix_id": clause.matrix_id,
+                "section_id": clause.section_id,
+                "section_title": clause.section_title,
+                "page_number": clause.page_number,
+                "type": clause.clause_type,  # 新字段
+                "actor": clause.actor,  # 新字段
+                "action": clause.action,  # 新字段
+                "object": clause.object,  # 新字段
+                "condition": clause.condition,  # 新字段
+                "deadline": clause.deadline,  # 新字段
+                "metric": clause.metric,  # 新字段
+                "original_text": clause.original_text,
+                "image_caption": clause.image_caption,
+                "table_caption": clause.table_caption,
                 "positions": []  # 默认空列表
             }
             
             # ✅ 解析positions_json
-            if req.positions_json:
+            if clause.positions_json:
                 try:
-                    req_dict["positions"] = json.loads(req.positions_json)
+                    clause_dict["positions"] = json.loads(clause.positions_json)
                 except json.JSONDecodeError:
-                    logger.warning(f"需求 {req.matrix_id} 的positions_json解析失败")
+                    logger.warning(f"条款 {clause.matrix_id} 的positions_json解析失败")
             
-            result.append(req_dict)
+            result.append(clause_dict)
         
         return result
     
     @staticmethod
-    def search_requirements(
+    def search_clauses(
         db: Session,
         keyword: str,
         task_id: str = None,
         limit: int = 50
-    ) -> List[Requirement]:
-        """搜索需求（简单关键词匹配）"""
-        query = db.query(Requirement).filter(
-            Requirement.requirement.like(f"%{keyword}%")
+    ) -> List[Clause]:
+        """搜索条款（简单关键词匹配）"""
+        query = db.query(Clause).filter(
+            Clause.original_text.like(f"%{keyword}%")
         )
         
         if task_id:
-            query = query.filter(Requirement.task_id == task_id)
+            query = query.filter(Clause.task_id == task_id)
         
         return query.limit(limit).all()
+
+
 
