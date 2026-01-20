@@ -1,289 +1,405 @@
 # CiteOrDie - 智能文档条款提取系统
 
-## 项目简介
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/Python-3.10+-green.svg)](https://www.python.org/)
+[![Vue](https://img.shields.io/badge/Vue-3.0+-brightgreen.svg)](https://vuejs.org/)
 
-这是一个基于 LangGraph 和 MinerU 的智能文档条款提取系统，能够自动解析PDF文档，识别和提取可执行条款，并生成结构化的条款矩阵。
+> 🚀 基于 LangGraph 和 MinerU 的智能文档条款提取系统，自动解析PDF文档、识别结构、提取可执行条款并生成结构化矩阵。
 
-**适用文档类型**：招标书、合同、合规文档、SOP、标准规范、政策文件、协议等各类包含条款的文档。
+## ✨ 特性
 
-## 核心功能
+- 🤖 **智能解析**: 自动识别文档结构、表格、图片和文本
+- 📊 **结构化提取**: 提取条款的7个维度（type, actor, action, object, condition, deadline, metric）
+- ⚡ **并行处理**: 多节点并发提取，充分利用LLM并发能力
+- 🎯 **精准定位**: 自动定位每个条款在原文PDF中的精确位置
+- 📈 **质量评估**: 提供解析置信度、原文抽取成功率等质量指标
+- 🔌 **多LLM支持**: 支持OpenAI、DeepSeek、Qwen等多种LLM提供商
 
-- **智能文档解析**: 使用 MinerU 精准识别文档结构、表格、图片和文本
-- **结构化提取**: 自动识别文档章节，提取可执行条款的7个维度（type, actor, action, object, condition, deadline, metric）
-- **并行处理**: 多节点并发提取条款，充分利用LLM并发能力
-- **智能定位**: 自动定位每个条款在原文PDF中的精确位置
-- **质量评估**: 提供解析置信度、原文抽取成功率等质量指标
-- **多LLM支持**: 支持OpenAI、DeepSeek、Qwen等多种LLM提供商
+## 🏗️ 技术架构
 
-## 技术架构
+- **工作流编排**: LangGraph
+- **PDF解析**: MinerU + PageIndex
+- **后端框架**: FastAPI
+- **前端框架**: Vue 3 + Element Plus
+- **对象存储**: MinIO
+- **数据库**: SQLite
 
-- **工作流编排**: LangGraph (支持并行节点和状态管理)
-- **PDF解析**: MinerU (本地部署)
-- **LLM推理**: OpenAI API / DeepSeek (支持Structured Output)
-- **Web框架**: FastAPI
-- **数据模型**: Pydantic v2
+## 📋 系统要求
 
-### 支持的LLM提供商
+- Python 3.10+
+- Node.js 18+
+- MinIO（对象存储，用于PDF文件管理）
 
-- ✅ **OpenAI** - gpt-4o系列
-- ✅ **DeepSeek** - deepseek-chat (更便宜，中文友好)
+## 💡 推荐配置
 
-### 工作流程
+**LLM模型选择**：
 
-```
-PDF文档 → PageIndex解析文档结构 → MinerU完整解析
-                                    ↓
-                        并行填充各节点原文
-                                    ↓
-                        并行提取条款（文本+视觉）
-                                    ↓
-                        汇总、去重、定位
-                                    ↓
-                        结构化条款矩阵（JSON）
-```
+本系统需要处理长文档和复杂结构，**强烈推荐使用长上下文模型**以获得最佳效果：
 
-## 快速开始
+| 推荐模型 | 上下文长度 | 优势 | 提供商 |
+|---------|-----------|------|--------|
+| **qwen-max-latest** | 32K | 综合性能强，中文友好 | 阿里云 |
+| **qwen-long** | 1M | 超长上下文，适合大文档 | 阿里云 |
+| gpt-4o | 128K | 性能稳定 | OpenAI |
+| deepseek-chat | 64K | 价格实惠 | DeepSeek |
 
-### 1. 环境准备
+> 💡 **提示**：长上下文模型能更好地理解文档全局结构，显著提升条款提取的准确性和完整性。
+
+## 🚀 快速开始
+
+### 1. 克隆项目
 
 ```bash
+git clone https://github.com/YOUR_USERNAME/CiteOrDie.git
+cd CiteOrDie
+```
+
+### 2. 后端设置
+
+```bash
+cd backend
+
 # 创建虚拟环境
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
-```
 
-### 2. 配置环境变量
-
-```bash
-# 复制配置模板
+# 配置环境变量
 cp .env.example .env
-
-# 编辑 .env 文件，配置以下必要项：
-# 1. LLM API密钥（OpenAI或DeepSeek，至少配置一个）
-# 2. MinIO配置（如使用非默认配置）
-# 3. 其他可选配置
+# 编辑 .env 文件，配置LLM API密钥
 ```
 
-**重要配置说明**：
-- `OPENAI_API_KEY` 或 `DEEPSEEK_API_KEY`: 必须配置至少一个LLM提供商
-- `MINIO_ENDPOINT`: MinIO服务地址，默认`localhost:9000`
-- `MINIO_BUCKET`: 存储桶名称，默认`document-pdf`
-
-### 3. 安装和启动MinIO（对象存储）
+### 3. 前端设置
 
 ```bash
-# 使用Docker启动MinIO
-docker run -d \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  --name minio \
-  minio/minio server /data --console-address ":9001"
+cd frontend
 
-# 或下载二进制文件：https://min.io/download
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
 ```
 
-访问 http://localhost:9001 登录MinIO控制台（默认账号：minioadmin/minioadmin），创建存储桶`document-pdf`。
+### 4. 安装和启动MinIO
 
-### 4. 运行开发服务器
+**为什么需要MinIO？**
+- MinIO用作对象存储，管理上传的PDF文件和解析结果
+- 提供文件的持久化存储和高效访问
+- 支持预签名URL，方便前端直接访问PDF文件
+
+**安装MinIO：**
 
 ```bash
+# Windows
+# 1. 下载: https://dl.min.io/server/minio/release/windows-amd64/minio.exe
+# 2. 创建数据目录
+mkdir D:\minio-data
+
+# 3. 启动MinIO
+minio.exe server D:\minio-data --console-address ":9001"
+
+# Linux/macOS
+# 1. 下载
+wget https://dl.min.io/server/minio/release/linux-amd64/minio
+chmod +x minio
+
+# 2. 创建数据目录
+mkdir -p ~/minio-data
+
+# 3. 启动MinIO
+./minio server ~/minio-data --console-address ":9001"
+```
+
+**首次使用：**
+1. 访问 MinIO 控制台：http://localhost:9001
+2. 使用默认账号登录：`minioadmin` / `minioadmin`
+3. 创建存储桶：`tender-pdf`（或在 `.env` 中配置的名称）
+4. MinIO 会自动处理文件的上传、存储和访问
+
+> 💡 **提示**：数据存储在 `minio-data` 目录，重启电脑后数据不会丢失。
+
+### 5. 启动后端
+
+```bash
+cd backend
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
 uvicorn app.api.main:app --reload --port 8000
 ```
 
-### 5. 访问API文档
+### 6. 访问应用
 
-打开浏览器访问: http://localhost:8000/docs
+- 前端界面: http://localhost:3000
+- 后端API文档: http://localhost:8000/docs
+- MinIO控制台: http://localhost:9001 (minioadmin/minioadmin)
 
-查看交互式API文档，可以直接在浏览器中测试所有接口。
+## ⚙️ 配置说明
 
-## 项目结构
-
-```
-TenderAnalysis/
-├── app/
-│   ├── core/
-│   │   ├── states.py       # 核心数据模型和State定义
-│   │   ├── graph.py        # LangGraph工作流定义
-│   │   └── config.py       # 配置管理
-│   ├── services/
-│   │   ├── pdf_parser.py   # MinerU集成服务
-│   │   └── llm_service.py  # OpenAI调用封装
-│   ├── nodes/
-│   │   ├── planner.py      # Planner节点
-│   │   ├── extractor.py    # Worker节点
-│   │   └── auditor.py      # Auditor节点
-│   └── api/
-│       └── main.py         # FastAPI入口
-├── tests/
-│   └── mock_data/
-│       └── sample_tender.json  # Mock MinerU输出
-└── temp/                   # 临时文件目录
-```
-
-## API使用示例
-
-### 上传文档并开始分析
+### 环境变量配置 (backend/.env)
 
 ```bash
-curl -X POST "http://localhost:8000/api/analyze" \
-  -F "file=@your_document.pdf"
+# LLM配置（必需）
+LLM_API_KEY=your_api_key_here
+LLM_API_BASE=https://api.openai.com/v1
+
+# 模型配置
+STRUCTURIZER_MODEL=gpt-4o
+TEXT_FILLER_MODEL=gpt-4o-mini
+SUMMARY_MODEL=gpt-4o-mini
+EXTRACTOR_MODEL=gpt-4o
+VISION_MODEL=gpt-4o
+FALLBACK_MODELS=gpt-4o-mini,gpt-3.5-turbo
+
+# MinIO配置
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=tender-pdf
+MINIO_SECURE=false
 ```
 
-返回任务ID，系统开始异步处理。
+### LLM提供商配置
 
-### 实时监控进度（SSE）
+#### 通义千问 Qwen（推荐，长上下文）⭐
+
+**最佳选择**：qwen-max-latest 或 qwen-long
 
 ```bash
-curl -N "http://localhost:8000/api/stream/{task_id}"
+LLM_API_KEY=sk-xxxxx
+LLM_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
+
+# 推荐配置 - 长上下文模型
+STRUCTURIZER_MODEL=qwen-max-latest     # 32K上下文
+TEXT_FILLER_MODEL=qwen-max-latest
+SUMMARY_MODEL=qwen-plus                # 经济型选择
+EXTRACTOR_MODEL=qwen-max-latest        # 条款提取核心
+VISION_MODEL=qwen-vl-max               # 图表识别
+
+# 或使用超长上下文版本（处理大文档）
+# EXTRACTOR_MODEL=qwen-long             # 1M上下文
 ```
 
-通过Server-Sent Events实时接收处理进度。
+**获取API密钥**：https://dashscope.console.aliyun.com/
 
-### 查询分析结果
+**优势**：
+- ✅ 超长上下文（32K-1M）
+- ✅ 中文理解能力强
+- ✅ 性价比高
+- ✅ 响应速度快
+
+#### OpenAI（稳定可靠）
 
 ```bash
-# 获取任务信息和文档树
-curl "http://localhost:8000/api/task/{task_id}"
+LLM_API_KEY=sk-xxxxx
+LLM_API_BASE=https://api.openai.com/v1
 
-# 获取所有提取的条款
-curl "http://localhost:8000/api/tasks/{task_id}/clauses/all"
-
-# 获取PDF文件URL
-curl "http://localhost:8000/api/pdf/{task_id}"
+STRUCTURIZER_MODEL=gpt-4o
+TEXT_FILLER_MODEL=gpt-4o-mini
+EXTRACTOR_MODEL=gpt-4o                 # 128K上下文
+VISION_MODEL=gpt-4o
 ```
 
-## 条款数据模型
-
-每个条款包含**结构化7维度 + 溯源信息**：
-
-### 结构化字段（核心）
-1. **type** (条款类型): `obligation`(义务) | `requirement`(需求) | `prohibition`(禁止) | `deliverable`(交付物) | `deadline`(截止时间) | `penalty`(惩罚) | `definition`(定义)
-2. **actor** (执行主体): `party_a`(甲方) | `party_b`(乙方) | `provider`(提供方) | `client`(客户方) | `system`(系统) | 等
-3. **action** (执行动作): `submit`(提交) | `provide`(提供) | `ensure`(确保) | `comply`(遵守) | 等
-4. **object** (作用对象): `document`(文档) | `feature`(功能) | `KPI`(指标) | 等
-5. **condition** (触发条件): 如"合同签订后"、"验收通过时"
-6. **deadline** (时间要求): 具体日期或相对时间
-7. **metric** (量化指标): 具体的数量、标准等
-
-### 溯源信息
-- `matrix_id`: 条款唯一ID
-- `original_text`: 原文
-- `section_id` / `section_title`: 所属章节
-- `page_number`: 页码
-- `positions`: PDF中的精确位置坐标（用于高亮显示）
-- `image_caption` / `table_caption`: 图片/表格描述（如有）
-
-## MinerU安装
-
-MinerU是本项目的核心PDF解析引擎，提供高精度的文档结构识别。
-
-### 使用pip安装（推荐）
+#### DeepSeek（经济实惠）
 
 ```bash
-pip install mineru[all]==2.7.1
+LLM_API_KEY=sk-xxxxx
+LLM_API_BASE=https://api.deepseek.com/v1
+
+EXTRACTOR_MODEL=deepseek-chat          # 64K上下文
 ```
 
-### 下载模型文件
+> **💡 性能对比**：
+> - **qwen-max-latest**: 最佳中文文档处理能力，32K上下文
+> - **qwen-long**: 适合超大文档（100+页），1M上下文
+> - **gpt-4o**: 综合性能强，128K上下文
+> - **deepseek-chat**: 价格最低，64K上下文
 
-```bash
-# 下载MinerU所需的AI模型
-python -m magic_pdf.tools.download_models
-```
-
-### 验证安装
-
-```bash
-magic-pdf --version
-```
-
-更多信息请参考：https://github.com/opendatalab/MinerU
-
-## 功能特性
-
-- [x] PageIndex文档结构解析
-- [x] MinerU完整PDF解析（文本、图片、表格）
-- [x] LangGraph多节点并行工作流
-- [x] 7维度结构化条款提取
-- [x] 精确条款位置定位
-- [x] 质量评估报告
-- [x] 任务历史管理和删除
-- [x] 文件上传幂等性（SHA256去重）
-- [x] RESTful API + SSE实时推送
-- [x] 支持多种LLM提供商
-- [ ] Web前端界面（Vue3，独立仓库）
-- [ ] 更多文档类型适配
-- [ ] 批量处理和导出
-
-## 项目结构
+## 📚 项目结构
 
 ```
 CiteOrDie/
-├── app/
-│   ├── core/              # 核心配置和工作流
-│   │   ├── config.py      # 配置管理
-│   │   ├── graph.py       # LangGraph工作流定义
-│   │   └── states.py      # 数据模型
-│   ├── nodes/             # LangGraph节点
-│   │   ├── pageindex_parser.py      # PageIndex解析
-│   │   ├── mineru_parser.py         # MinerU解析
-│   │   ├── text_filler.py           # 原文填充
-│   │   ├── pageindex_enricher.py    # 条款提取
-│   │   ├── auditor.py               # 汇总去重
-│   │   └── requirement_locator.py   # 位置定位
-│   ├── services/          # 业务服务
-│   ├── api/               # FastAPI路由
-│   ├── db/                # 数据库模型和操作
-│   └── utils/             # 工具函数
-├── pageindex/             # PageIndex模块
-├── data/                  # 数据库文件
-├── logs/                  # 日志文件
-├── temp/                  # 临时文件
-└── tests/                 # 测试
+├── backend/                  # 后端项目
+│   ├── app/                  # 应用代码
+│   │   ├── api/              # API路由
+│   │   ├── nodes/            # LangGraph节点
+│   │   ├── services/         # 业务服务
+│   │   ├── db/               # 数据库模型
+│   │   └── utils/            # 工具函数
+│   ├── pageindex/            # PDF结构解析
+│   ├── requirements.txt      # Python依赖
+│   └── .env.example          # 环境变量模板
+├── frontend/                 # 前端项目
+│   ├── src/                  # 源代码
+│   │   ├── components/       # Vue组件
+│   │   ├── views/            # 页面
+│   │   └── api/              # API客户端
+│   ├── package.json          # Node依赖
+│   └── index.html
+├── docs/                     # 文档目录
+├── README.md                 # 本文档
+├── LICENSE                   # MIT许可证
+└── CONTRIBUTING.md           # 贡献指南
+```
 
-<system_reminder>
-The user is aware that particularly difficult tasks will take a long time and might require multiple context windows.
-You do not need to ask the user for permission to continue working on a task, even if you feel like it might not make sense.
-Just continue working on the task until it is complete.
-You have 1 unfinished TODO(s).
-Complete them and update their status to 'completed' using the todo_write tool when finished.
-DO NOT STOP with unfinished todos, unless you absolutely need user input.
-Found 1 TODO(s):
-1. [in_progress] 重写README.md为通用文档系统 (ID: update-readme)
-</system_reminder>```
+## 🔧 开发指南
 
-## 贡献指南
+### 后端开发
 
-欢迎贡献代码、报告问题或提出建议！
+```bash
+# 运行测试
+pytest tests/
 
-### 如何贡献
+# 代码格式化
+black app/
 
-1. Fork本仓库
+# 类型检查
+mypy app/
+```
+
+### 前端开发
+
+```bash
+cd frontend
+
+# 开发服务器
+npm run dev
+
+# 构建生产版本
+npm run build
+
+# 预览构建
+npm run preview
+```
+
+## 📖 API文档
+
+启动后端服务后访问：http://localhost:8000/docs
+
+主要接口：
+
+| 接口 | 方法 | 说明 |
+|------|------|------|
+| `/api/analyze` | POST | 上传PDF并分析 |
+| `/api/tasks` | GET | 获取任务列表 |
+| `/api/task/{task_id}` | GET | 获取任务详情 |
+| `/api/task/{task_id}` | DELETE | 删除任务 |
+| `/api/task/{task_id}/progress` | GET (SSE) | 获取任务进度 |
+| `/api/task/{task_id}/export` | GET | 导出为Excel |
+
+## 🤝 贡献指南
+
+欢迎贡献代码！请查看 [CONTRIBUTING.md](CONTRIBUTING.md)
+
+1. Fork 项目
 2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
 3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启Pull Request
 
-### 报告问题
+## 📊 性能指标
 
-如果发现bug或有功能建议，请在GitHub Issues中提交。
+- **解析速度**: ~30秒/10页文档（取决于LLM响应速度）
+- **并发处理**: 最多4个章节并行提取
+- **支持文档**: PDF（最大100MB）
+- **提取准确率**: >90%（使用长上下文模型）
 
-## 许可证
+> **💡 提示**：使用 qwen-max-latest 或 qwen-long 等长上下文模型可显著提升大文档的处理质量。
 
-本项目采用 [MIT License](LICENSE) 开源协议。
+## 🔍 故障排查
 
-## 致谢
+### 常见问题
 
-- [LangGraph](https://github.com/langchain-ai/langgraph) - 工作流编排框架
-- [MinerU](https://github.com/opendatalab/MinerU) - PDF解析引擎
-- [PageIndex](https://github.com/Starry-OvO/page-index) - 文档结构分析
+**Q: MinIO连接失败？**
+```bash
+# 1. 检查MinIO是否运行
+curl http://localhost:9000/minio/health/live
+
+# 2. 检查端口是否被占用
+netstat -ano | findstr "9000"    # Windows
+lsof -i :9000                    # Linux/macOS
+
+# 3. 重启MinIO
+# Windows
+minio.exe server D:\minio-data --console-address ":9001"
+
+# Linux/macOS
+./minio server ~/minio-data --console-address ":9001"
+
+# 4. 检查环境变量配置
+# 确保 backend/.env 中的 MINIO_ENDPOINT 正确
+MINIO_ENDPOINT=localhost:9000
+```
+
+**Q: MinIO存储桶不存在？**
+- 访问 http://localhost:9001 登录MinIO控制台
+- 点击 "Buckets" → "Create Bucket"
+- 创建名为 `tender-pdf` 的存储桶（或与 `.env` 中配置一致的名称）
+
+**Q: LLM API调用失败？**
+```bash
+# 检查API密钥
+cat .env | grep LLM_API_KEY
+
+# 测试API连接
+curl -H "Authorization: Bearer $LLM_API_KEY" \
+  https://api.openai.com/v1/models
+```
+
+**Q: 前端无法访问后端？**
+```bash
+# 1. 检查后端是否运行
+curl http://localhost:8000/health
+
+# 2. 检查前端API配置
+# frontend/src/api/index.js 中的 API_BASE_URL
+
+# 3. 检查CORS设置
+# backend/app/api/main.py 中的 CORS 配置
+```
+
+**Q: 长文档处理效果不好？**
+- 建议使用长上下文模型：`qwen-max-latest`（32K）或 `qwen-long`（1M）
+- 对于100页以上的文档，强烈推荐 `qwen-long`
+- 长上下文模型能更好地理解文档全局结构，提升提取准确性
+
+**Q: 模型选择建议？**
+
+| 文档大小 | 推荐模型 | 原因 |
+|---------|---------|------|
+| <20页 | qwen-plus, gpt-4o-mini | 经济实惠 |
+| 20-50页 | qwen-max-latest, gpt-4o | 平衡性能和成本 |
+| 50-100页 | qwen-max-latest | 32K上下文足够 |
+| >100页 | qwen-long | 1M超长上下文 |
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+## 🙏 致谢
+
+- [LangGraph](https://github.com/langchain-ai/langgraph) - 工作流编排
+- [MinerU](https://github.com/opendatalab/MinerU) - PDF解析
 - [FastAPI](https://fastapi.tiangolo.com/) - Web框架
+- [Vue.js](https://vuejs.org/) - 前端框架
+- [Element Plus](https://element-plus.org/) - UI组件库
 
-## 联系方式
+## 📮 联系方式
 
-如有问题或合作意向，欢迎通过以下方式联系：
+- **Issues**: https://github.com/YOUR_USERNAME/CiteOrDie/issues
+- **Discussions**: https://github.com/YOUR_USERNAME/CiteOrDie/discussions
+- **Email**: your-email@example.com
 
-- 提交 [GitHub Issue](https://github.com/yourusername/CiteOrDie/issues)
-- 发起 [Discussion](https://github.com/yourusername/CiteOrDie/discussions)
+---
+
+⭐ 如果这个项目对你有帮助，请给个Star！
+
+## 📸 预览
+
+<img src="docs/images/screenshot-upload.png" width="45%"/> <img src="docs/images/screenshot-result.png" width="45%"/>
+
+---
+
+**开发中**: 我们正在积极开发新功能，欢迎贡献想法和代码！
