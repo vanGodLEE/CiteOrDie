@@ -62,7 +62,8 @@ def convert_mineru_to_page_rect(
 
 def convert_positions_for_frontend(
     positions: List[List[int]],
-    pdf_path: str
+    pdf_path: str = None,
+    page_dimensions: List[Tuple[float, float]] = None
 ) -> List[List[float]]:
     """
     批量转换positions数组为页面坐标系统（左上原点）
@@ -73,7 +74,8 @@ def convert_positions_for_frontend(
     
     Args:
         positions: [[page_idx, x0, y0, x1, y1], ...] (MinerU格式，0-based页码，归一化0-1000)
-        pdf_path: PDF文件路径
+        pdf_path: PDF文件路径（如果未提供page_dimensions则必需）
+        page_dimensions: 预先获取的页面尺寸列表 [(width, height), ...] (性能优化，避免重复打开PDF)
     
     Returns:
         [[page_idx, x0, y0, x1, y1], ...] (页面坐标，0-based页码，左上原点，单位points)
@@ -81,15 +83,22 @@ def convert_positions_for_frontend(
     if not positions:
         return []
     
-    # ✅ 关键修复：使用pdfplumber获取页面尺寸（与RAGFlow完全一致）
-    with pdfplumber.open(pdf_path) as pdf:
-        # 预先获取所有页面尺寸
-        page_dimensions = [(page.width, page.height) for page in pdf.pages]
-        logger.info(f"[坐标转换] 使用pdfplumber获取了 {len(page_dimensions)} 页的尺寸")
+    # 如果已经提供了page_dimensions，直接使用（性能优化）
+    if page_dimensions is None:
+        if pdf_path is None:
+            raise ValueError("必须提供 pdf_path 或 page_dimensions")
         
-        # 调试：打印前几页的尺寸
-        for i, (w, h) in enumerate(page_dimensions[:3]):
-            logger.debug(f"[坐标转换] 页面 {i}: {w:.1f} x {h:.1f} points")
+        # ✅ 关键修复：使用pdfplumber获取页面尺寸（与RAGFlow完全一致）
+        with pdfplumber.open(pdf_path) as pdf:
+            # 预先获取所有页面尺寸
+            page_dimensions = [(page.width, page.height) for page in pdf.pages]
+            logger.info(f"[坐标转换] 使用pdfplumber获取了 {len(page_dimensions)} 页的尺寸")
+            
+            # 调试：打印前几页的尺寸
+            for i, (w, h) in enumerate(page_dimensions[:3]):
+                logger.debug(f"[坐标转换] 页面 {i}: {w:.1f} x {h:.1f} points")
+    else:
+        logger.debug(f"[坐标转换] 使用缓存的页面尺寸 ({len(page_dimensions)} 页)")
     
     converted_positions = []
     for pos in positions:
@@ -133,6 +142,22 @@ def get_page_dimensions(pdf_path: str, page_idx: int) -> Tuple[float, float]:
         else:
             logger.warning(f"[坐标转换] 页码 {page_idx} 超出范围，返回A4默认尺寸")
             return 595, 842
+
+
+def get_all_page_dimensions(pdf_path: str) -> List[Tuple[float, float]]:
+    """
+    获取PDF所有页面的尺寸（用于批量转换时缓存，避免重复打开PDF）
+    
+    Args:
+        pdf_path: PDF文件路径
+    
+    Returns:
+        [(width, height), ...] 所有页面的尺寸列表
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        page_dimensions = [(page.width, page.height) for page in pdf.pages]
+        logger.info(f"[坐标转换] 缓存了 {len(page_dimensions)} 页的尺寸")
+        return page_dimensions
 
 
 # 前端使用示例（JavaScript）

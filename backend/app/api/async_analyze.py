@@ -84,7 +84,16 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             ClauseRepository
         )
         from app.db.database import SessionLocal
-        from app.utils.mineru_coordinate_converter import convert_positions_for_frontend
+        from app.utils.mineru_coordinate_converter import convert_positions_for_frontend, get_all_page_dimensions
+        
+        # ✅ 性能优化：一次性缓存所有页面尺寸，避免重复打开PDF
+        logger.info(f"[性能优化] 正在缓存PDF页面尺寸: {pdf_path}")
+        try:
+            page_dimensions_cache = get_all_page_dimensions(pdf_path)
+            logger.success(f"[性能优化] 成功缓存 {len(page_dimensions_cache)} 页尺寸")
+        except Exception as e:
+            logger.warning(f"[性能优化] 缓存页面尺寸失败，将在转换时动态获取: {e}")
+            page_dimensions_cache = None
         
         db = SessionLocal()
         try:
@@ -110,7 +119,12 @@ async def run_analysis_task(task_id: str, pdf_path: str):
                 positions = clause.positions if hasattr(clause, 'positions') else []
                 if positions:
                     try:
-                        positions = convert_positions_for_frontend(positions, pdf_path)
+                        # 使用缓存的页面尺寸
+                        positions = convert_positions_for_frontend(
+                            positions, 
+                            pdf_path=pdf_path,
+                            page_dimensions=page_dimensions_cache
+                        )
                         logger.debug(f"条款 {clause.matrix_id} 坐标已转换为页面坐标（左上原点，单位points）")
                     except Exception as e:
                         logger.warning(f"转换条款 {clause.matrix_id} 坐标失败: {e}，保留原始坐标")
@@ -180,9 +194,11 @@ async def run_analysis_task(task_id: str, pdf_path: str):
             """递归转换树节点的positions"""
             if node_data.get("positions"):
                 try:
+                    # 使用缓存的页面尺寸
                     node_data["positions"] = convert_positions_for_frontend(
                         node_data["positions"], 
-                        pdf_path
+                        pdf_path=pdf_path,
+                        page_dimensions=page_dimensions_cache
                     )
                 except Exception as e:
                     logger.warning(f"转换节点 {node_data.get('title')} 的positions失败: {e}")

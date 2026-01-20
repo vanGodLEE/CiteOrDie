@@ -172,27 +172,27 @@ npm run dev
 
 ```json
 {
-  "clause_id": "c_00017",
-  "type": "deadline",
-  "actor": "Supplier",
-  "action": "deliver",
-  "object": "the goods",
-  "condition": "after receiving the PO",
-  "deadline": "30 days",
-  "metric": "N/A",
-  "text": "Supplier shall deliver within 30 days...",
-  "confidence": 0.84,
-  "evidence": [
-    {
-      "page_index": 12,
-      "bbox": [102.4, 233.1, 521.9, 278.6],
-      "positions": [{"x": 102.4, "y": 233.1, "w": 419.5, "h": 45.5}],
-      "ref_box": "CropBox",
-      "unit": "pdf_pt",
-      "origin": "top_left",
-      "block_id": "b_12_0043"
-    }
-  ]
+        "matrix_id": "0013-CLS-002",
+        "node_id": "0013",
+        "section_title": "Proposal Submission",
+        "type": "obligation",
+        "actor": "supplier",
+        "action": "submit",
+        "object": "Technical Proposal",
+        "condition": "xxxxx",
+        "deadline": "xxxxx",
+        "metric": "xxxxx",
+        "original_text": "(b) Technical Proposal: hqsact.techproposal@nato.int",
+        "page_number": 5,
+        "positions": [
+            [
+                4,
+                93.636,
+                534.6,
+                380.664,
+                548.856
+            ]
+        ]
 }
 ```
 
@@ -332,12 +332,17 @@ MIT
 
 ## 🎬 功能演示
 
-> 建议：放 1 个总览 GIF + 2 个关键 GIF（高亮联动、质量报告）
+### 上传
+![上传演示](docs/images/upload-demo.gif)
 
-* `docs/images/upload-demo.gif`：上传与进度
-* `docs/images/result-demo.gif`：三栏联动
-* `docs/images/clause-interaction.gif`：条款→证据定位高亮
-* `docs/images/quality-report.png`：质量报告截图
+### 分析过程
+![分析过程](docs/images/upload-demo.gif)
+
+### 结果展示和交互
+![结果演示](docs/images/result-demo.gif)
+
+### 质量报告
+![质量报告](docs/images/quality-report.gif)
 
 ---
 
