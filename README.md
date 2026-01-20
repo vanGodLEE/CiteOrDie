@@ -335,14 +335,11 @@ MIT
 ### 上传
 ![上传演示](docs/images/upload-demo.gif)
 
-### 分析过程
-![分析过程](docs/images/upload-demo.gif)
-
 ### 结果展示和交互
 ![结果演示](docs/images/result-demo.gif)
 
 ### 质量报告
-![质量报告](docs/images/quality-report.gif)
+![质量报告](docs/images/quality-report.png)
 
 ---
 
