@@ -29,7 +29,7 @@ class MinerUService:
         self,
         pdf_path: str,
         task_id: str,
-        backend: str = "hybrid-auto-engine",
+        backend: str = "pipeline",
         device: str = "cuda"
     ) -> Optional[Dict[str, Any]]:
         """
@@ -38,7 +38,7 @@ class MinerUService:
         Args:
             pdf_path: PDF文件路径
             task_id: 任务ID（用于隔离输出目录）
-            backend: MinerU后端引擎（默认: hybrid-auto-engine）
+            backend: MinerU后端引擎（默认: pipeline，输出到auto文件夹）
             device: 运行设备（cuda/cpu，默认: cuda）
             
         Returns:
@@ -92,7 +92,7 @@ class MinerUService:
             pdf_name = Path(pdf_path).stem
             pdf_output_dir = task_output_dir / pdf_name
             
-            # MinerU可能会转换backend名称（如 hybrid-auto-engine -> hybrid_auto）
+            # MinerU会转换backend名称（如 pipeline -> auto）
             # 因此我们需要扫描实际存在的目录
             if not pdf_output_dir.exists():
                 logger.error(f"PDF输出目录不存在: {pdf_output_dir}")

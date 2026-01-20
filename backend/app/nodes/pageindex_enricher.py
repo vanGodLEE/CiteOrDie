@@ -13,6 +13,7 @@ from app.core.states import SectionState, ClauseItem, PageIndexNode, create_matr
 from app.services.llm_service import get_llm_service
 from app.api.async_tasks import TaskManager
 from app.core.config import settings
+from app.utils.progress_helper import log_step
 
 
 def pageindex_enricher_node(state: SectionState) -> Dict[str, Any]:

@@ -280,14 +280,14 @@ class QualityReportService:
         pdf_path_obj = Path(pdf_path)
         pdf_name = pdf_path_obj.stem
         
-        # MinerU输出目录：mineru_output/{task_id}/{pdf_name}/hybrid_auto/
+        # MinerU输出目录：mineru_output/{task_id}/{pdf_name}/auto/
         middle_json_path = None
         mineru_output_dir = Path("mineru_output")
         
         # 遍历查找最新的middle.json
         if mineru_output_dir.exists():
             for task_dir in sorted(mineru_output_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-                potential_path = task_dir / pdf_name / "hybrid_auto" / f"{pdf_name}_middle.json"
+                potential_path = task_dir / pdf_name / "auto" / f"{pdf_name}_middle.json"
                 if potential_path.exists():
                     middle_json_path = str(potential_path)
                     break

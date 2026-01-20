@@ -207,26 +207,14 @@ class LLMService:
         Returns:
             生成的文本
         """
-        # 解析model参数
+        # 获取client和模型名称
         if model:
-            if ":" in model:
-                model_provider, model_name = model.split(":", 1)
-                model_provider = model_provider.lower()
-            else:
-                model_provider = self.default_provider
-                model_name = model
+            client, model_name = self._get_client_for_model(model)
         else:
-            model_provider = self.default_provider
-            model_name = self.default_model
+            # 默认使用summary模型
+            client, model_name = self._get_client_for_model(settings.summary_model)
         
-        logger.debug(f"文本生成调用: provider={model_provider}, model={model_name}")
-        
-        # 获取对应provider的client
-        try:
-            client = self._get_client(model_provider)
-        except ValueError as e:
-            logger.error(f"无法获取provider '{model_provider}' 的client: {e}")
-            raise
+        logger.debug(f"文本生成调用: model={model_name}")
         
         try:
             response = client.chat.completions.create(
