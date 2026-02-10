@@ -99,7 +99,7 @@
 ### 1) 克隆项目
 
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/CiteOrDie.git
+git clone https://github.com/vanGodLEE/CiteOrDie.git
 cd CiteOrDie
 ```
 
