@@ -1,0 +1,101 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 临时文件和缓存
+temp/
+tmp/
+*.tmp
+
+# 日志文件（防止提交真实文档）
+*.log
+logs/*.json
+logs/*.log
+!logs/.gitkeep
+
+# MinerU 输出目录（包含解析的真实文档）
+temp/mineru_output/
+mineru_output/*/
+!mineru_output/.gitkeep
+
+# 中间JSON文件（包含文档内容）
+middle_json/*.json
+!middle_json/.gitkeep
+
+# 上传的PDF文件
+temp/uploads/*
+!temp/uploads/.gitkeep
+
+# 数据库文件（包含真实任务数据）
+data/*.db
+data/*.db-*
+!data/.gitkeep
+
+# 环境配置（包含敏感信息）
+.env
+.env.*
+!.env.example
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 上传的PDF文件和测试文件
+temp/*.pdf
+*.pdf
+
+# 备份文件
+*.backup
+*.bak
+
+# 大文件和二进制文件
+*.zip
+*.tar.gz
+*.rar
