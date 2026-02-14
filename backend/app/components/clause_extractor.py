@@ -9,6 +9,7 @@ embedded images via a vision model.
 import json
 import re
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -503,41 +504,9 @@ def _extract_image_paths_from_markdown(
     return tuples
 
 
-def _extract_clauses_from_images(
-    image_paths: List[Tuple[str, str]],
-    node: PageIndexNode,
-    llm_client: Any,
-    task_id: str | None = None,
-) -> List[ClauseItem]:
-    """
-    Extract clauses from images one at a time using the vision model.
-
-    Args:
-        image_paths: ``(absolute_path, relative_path)`` tuples.
-        node: Parent document-tree node.
-        llm_client: :class:`LLMClient` instance.
-        task_id: For progress reporting.
-
-    Returns:
-        Clause list with ``img_path`` filled for each item.
-    """
-    if not image_paths:
-        return []
-
-    logger.info(
-        f"Node '{node.title}' has {len(image_paths)} image(s) – "
-        "extracting clauses one by one"
-    )
-
-    all_clauses: List[ClauseItem] = []
-
-    for idx, (abs_path, rel_path) in enumerate(image_paths, 1):
-        logger.info(f"  Processing image {idx}/{len(image_paths)}: {rel_path}")
-        log_step(task_id, f"Vision analysis {idx}/{len(image_paths)}: {rel_path}")
-
-        try:
-            # NOTE: The vision prompt is in Chinese intentionally.
-            prompt = f"""你是文档分析专家。请分析这张图片内容，提取其中的可执行条款。
+def _build_vision_prompt(node: PageIndexNode, rel_path: str) -> str:
+    """Build the vision-extraction prompt for a single image."""
+    return f"""你是文档分析专家。请分析这张图片内容，提取其中的可执行条款。
 
 ## 上下文信息
 - 章节标题：{node.title}
@@ -588,50 +557,122 @@ def _extract_clauses_from_images(
 如果图片中没有条款信息，返回空数组[]。
 """
 
-            response_text = llm_client.vision_completion(
-                text_prompt=prompt,
-                image_inputs=[abs_path],
-                temperature=0.2,
-                max_tokens=4000,
+
+def _process_single_image(
+    abs_path: str,
+    rel_path: str,
+    node: PageIndexNode,
+    llm_client: Any,
+) -> List[ClauseItem]:
+    """
+    Extract clauses from a single image (thread-safe worker function).
+
+    Returns:
+        Clause list for this image, or empty list on failure.
+    """
+    try:
+        prompt = _build_vision_prompt(node, rel_path)
+
+        response_text = llm_client.vision_completion(
+            text_prompt=prompt,
+            image_inputs=[abs_path],
+            temperature=0.2,
+            max_tokens=4000,
+        )
+
+        json_match = re.search(r"\[[\s\S]*\]", response_text)
+        if not json_match:
+            logger.warning(
+                f"Image {rel_path}: vision model response contains no JSON array"
             )
+            return []
 
-            # Parse JSON array from the response
+        items_data = json.loads(json_match.group())
+        clauses: List[ClauseItem] = []
+
+        for item in items_data:
+            item.setdefault("section_id", node.node_id or "UNKNOWN")
+            item.setdefault("section_title", node.title)
+            item.setdefault("page_number", node.start_index)
+            item.setdefault("type", "requirement")
+            item["img_path"] = rel_path
+            clauses.append(ClauseItem(**item))
+
+        logger.info(f"  Image {rel_path}: extracted {len(clauses)} clause(s)")
+        return clauses
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Image {rel_path}: JSON parse error: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Image {rel_path}: processing failed: {e}")
+        return []
+
+
+def _extract_clauses_from_images(
+    image_paths: List[Tuple[str, str]],
+    node: PageIndexNode,
+    llm_client: Any,
+    task_id: str | None = None,
+) -> List[ClauseItem]:
+    """
+    Extract clauses from images **in parallel** using a thread pool.
+
+    The vision model API calls are I/O-bound, so parallel execution via
+    threads dramatically reduces wall-clock time (e.g. 5 images: ~50 s
+    serial → ~10 s parallel).
+
+    Args:
+        image_paths: ``(absolute_path, relative_path)`` tuples.
+        node: Parent document-tree node.
+        llm_client: :class:`LLMClient` instance (thread-safe via httpx).
+        task_id: For progress reporting.
+
+    Returns:
+        Clause list with ``img_path`` filled for each item.
+    """
+    if not image_paths:
+        return []
+
+    n_images = len(image_paths)
+    logger.info(
+        f"Node '{node.title}' has {n_images} image(s) – "
+        "extracting clauses in parallel"
+    )
+    log_step(
+        task_id,
+        f"Starting parallel vision analysis for {n_images} image(s)",
+    )
+
+    # Cap parallelism: respect the configured limit (avoids rate-limit
+    # pressure) and never use more workers than images.
+    max_workers = min(settings.vision_max_workers, n_images)
+    all_clauses: List[ClauseItem] = []
+    completed = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        # Submit all image tasks; use a dict to preserve order
+        future_to_path = {
+            pool.submit(
+                _process_single_image, abs_path, rel_path, node, llm_client,
+            ): (abs_path, rel_path)
+            for abs_path, rel_path in image_paths
+        }
+
+        for future in as_completed(future_to_path):
+            rel_path = future_to_path[future][1]
+            completed += 1
             try:
-                json_match = re.search(r"\[[\s\S]*\]", response_text)
-                if not json_match:
-                    logger.warning(
-                        f"Image {rel_path}: vision model response contains no JSON array"
-                    )
-                    continue
-
-                items_data = json.loads(json_match.group())
-
-                for i, item in enumerate(items_data, 1):
-                    item.setdefault("section_id", node.node_id or "UNKNOWN")
-                    item.setdefault("section_title", node.title)
-                    item.setdefault("page_number", node.start_index)
-                    item.setdefault("type", "requirement")
-                    item["img_path"] = rel_path
-
-                    temp_id = create_matrix_id(
-                        node.node_id or "UNKNOWN", len(all_clauses) + i,
-                    )
-                    item.setdefault("matrix_id", temp_id)
-
-                    all_clauses.append(ClauseItem(**item))
-
-                logger.info(
-                    f"  Image {rel_path}: extracted {len(items_data)} clause(s)"
+                clauses = future.result()
+                all_clauses.extend(clauses)
+                log_step(
+                    task_id,
+                    f"Vision analysis {completed}/{n_images} done: "
+                    f"{rel_path} ({len(clauses)} clauses)",
                 )
-
-            except json.JSONDecodeError as e:
-                logger.error(f"Image {rel_path}: JSON parse error: {e}")
-                logger.debug(f"Raw response (first 200 chars): {response_text[:200]}")
-                continue
-
-        except Exception as e:
-            logger.error(f"Image {rel_path}: processing failed: {e}")
-            continue
+            except Exception as e:
+                logger.error(f"Image {rel_path}: unexpected future error: {e}")
+                log_step(task_id, f"Vision analysis {completed}/{n_images} failed: {rel_path}")
 
     # Unified re-numbering across all images
     for i, clause in enumerate(all_clauses, 1):
@@ -639,7 +680,7 @@ def _extract_clauses_from_images(
 
     logger.info(
         f"Extracted {len(all_clauses)} clause(s) from "
-        f"{len(image_paths)} image(s) total"
+        f"{n_images} image(s) total (parallel, max_workers={max_workers})"
     )
     return all_clauses
 

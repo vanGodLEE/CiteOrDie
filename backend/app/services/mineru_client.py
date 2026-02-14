@@ -4,14 +4,82 @@ MinerU PDF extraction client.
 Wraps the ``mineru`` CLI tool to extract text, images, and tables from
 PDF documents.  Output is organised per task under a configurable base
 directory.
+
+Uses ``subprocess.Popen`` for streaming stderr in real-time so that
+MinerU's progress (batch info, model loading) can be reported to the
+task tracker during long-running parses.
 """
 
 import json
+import re
 import subprocess
+import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from loguru import logger
+
+
+def _detect_device() -> str:
+    """Auto-detect the best compute device for MinerU.
+
+    Returns ``"cuda"`` when a CUDA-capable PyTorch is installed **and**
+    at least one GPU is visible; otherwise ``"cpu"``.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            logger.info("CUDA available – MinerU will use GPU")
+            return "cuda"
+    except Exception:
+        pass
+    logger.info("CUDA not available – MinerU will use CPU")
+    return "cpu"
+
+
+# ---------------------------------------------------------------------------
+# Stderr streaming helper
+# ---------------------------------------------------------------------------
+
+_BATCH_RE = re.compile(r"Batch\s+(\d+)/(\d+):\s+(\d+)\s+pages/(\d+)\s+pages")
+_PROGRESS_RE = re.compile(r"(\d+)%\|")
+
+
+def _stream_stderr(
+    pipe,
+    collected: list,
+    on_progress: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Read *pipe* line-by-line, collecting output and emitting progress.
+
+    Runs in a daemon thread so that the main thread can wait on
+    ``proc.wait()`` without deadlock.
+    """
+    try:
+        for raw_line in pipe:
+            line = raw_line.rstrip("\n\r")
+            collected.append(line)
+
+            # Relay meaningful lines to the progress callback
+            if on_progress and line.strip():
+                # Detect MinerU batch info: "Batch 1/1: 21 pages/21 pages"
+                m = _BATCH_RE.search(line)
+                if m:
+                    on_progress(f"MinerU processing batch {m.group(1)}/{m.group(2)} ({m.group(3)} pages)")
+                    continue
+
+                # Detect model loading
+                if "DocAnalysis init" in line:
+                    on_progress("MinerU loading analysis model...")
+                    continue
+
+                # Detect progress bar percentage
+                m = _PROGRESS_RE.search(line)
+                if m:
+                    on_progress(f"MinerU progress: {m.group(1)}%")
+                    continue
+    except Exception:
+        pass  # pipe closed
 
 
 class MinerUClient:
@@ -34,7 +102,8 @@ class MinerUClient:
         pdf_path: str,
         task_id: str,
         backend: str = "pipeline",
-        device: str = "cuda",
+        device: str = "auto",
+        on_progress: Optional[Callable[[str], None]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Run MinerU on a PDF and return the parsed result.
@@ -43,7 +112,11 @@ class MinerUClient:
             pdf_path: Path to the source PDF file.
             task_id: Task identifier (isolates the output directory).
             backend: MinerU backend engine (default ``"pipeline"``).
-            device: Compute device (``"cuda"`` or ``"cpu"``).
+            device: Compute device. ``"auto"`` (default) detects CUDA
+                availability; also accepts ``"cuda"`` or ``"cpu"``.
+            on_progress: Optional callback ``(message: str) -> None``
+                invoked with human-readable progress strings as MinerU
+                runs (e.g. batch info, model loading).
 
         Returns:
             A dict containing ``content_list``, ``output_dir``,
@@ -61,7 +134,11 @@ class MinerUClient:
             task_output_dir = self.output_base_dir / task_id
             task_output_dir.mkdir(exist_ok=True)
 
-            # 3. Build the CLI command
+            # 3. Resolve device
+            if device == "auto":
+                device = _detect_device()
+
+            # 4. Build the CLI command
             cmd = [
                 "mineru",
                 "-p", pdf_path,
@@ -72,55 +149,114 @@ class MinerUClient:
 
             logger.info(f"Invoking MinerU on: {pdf_path}")
             logger.info(f"Command: {' '.join(cmd)}")
+            if on_progress:
+                on_progress("MinerU subprocess starting...")
 
-            # 4. Execute
-            proc = subprocess.run(
+            # 5. Execute with streaming stderr
+            stderr_lines: list = []
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="ignore",
             )
 
-            if proc.returncode != 0:
-                logger.error(f"MinerU exited with code {proc.returncode}")
-                logger.error(f"stderr: {proc.stderr}")
+            # Stream stderr in a background thread to avoid deadlock and
+            # to relay real-time progress to the task tracker.
+            stderr_thread = threading.Thread(
+                target=_stream_stderr,
+                args=(proc.stderr, stderr_lines, on_progress),
+                daemon=True,
+            )
+            stderr_thread.start()
+
+            # Read stdout (usually empty for MinerU)
+            stdout_data = proc.stdout.read() if proc.stdout else ""
+
+            # Wait for process to finish
+            returncode = proc.wait()
+            stderr_thread.join(timeout=5)
+
+            stderr_text = "\n".join(stderr_lines)
+
+            # Always log stderr tail
+            if stderr_text:
+                logger.debug(f"MinerU stderr (tail): {stderr_text[-2000:]}")
+
+            if returncode != 0:
+                logger.error(f"MinerU exited with code {returncode}")
+                return None
+
+            # Check for known fatal errors in stderr even when rc == 0
+            if stderr_text and ("Error" in stderr_text or "AssertionError" in stderr_text):
+                logger.error(
+                    f"MinerU reported errors despite exit code 0: "
+                    f"{stderr_text[-500:]}"
+                )
                 return None
 
             logger.info("MinerU parsing finished")
-            logger.debug(f"stdout: {proc.stdout}")
+            if stdout_data:
+                logger.debug(f"stdout: {stdout_data}")
 
-            # 5. Locate the output directory
-            #    Layout: <task_output_dir>/<pdf_stem>/<backend_alias>/
+            # 6. Locate the output directory
             pdf_name = pdf_file.stem
             pdf_output_dir = task_output_dir / pdf_name
 
             if not pdf_output_dir.exists():
-                logger.error(f"Expected output directory missing: {pdf_output_dir}")
-                return None
+                logger.warning(
+                    f"Expected output dir not found: {pdf_output_dir}. "
+                    "Scanning for alternatives..."
+                )
+                candidate_dirs = [
+                    d for d in task_output_dir.iterdir() if d.is_dir()
+                ]
+                if len(candidate_dirs) == 1:
+                    pdf_output_dir = candidate_dirs[0]
+                    logger.info(f"Using alternative output dir: {pdf_output_dir}")
+                elif len(candidate_dirs) > 1:
+                    from difflib import SequenceMatcher
+                    pdf_output_dir = max(
+                        candidate_dirs,
+                        key=lambda d: SequenceMatcher(
+                            None, d.name, pdf_name
+                        ).ratio(),
+                    )
+                    logger.info(f"Best match output dir: {pdf_output_dir}")
+                else:
+                    logger.error(
+                        f"No output directories found under: {task_output_dir}"
+                    )
+                    return None
 
-            # MinerU may remap the backend name (e.g. pipeline → auto),
-            # so we scan for the actual sub-directory.
+            # MinerU may remap backend name; scan for the actual sub-dir.
             backend_dirs = [d for d in pdf_output_dir.iterdir() if d.is_dir()]
             if not backend_dirs:
                 logger.error(f"No backend output directory found under: {pdf_output_dir}")
                 return None
 
-            content_dir = backend_dirs[0]  # typically only one
+            content_dir = backend_dirs[0]
             logger.info(f"MinerU output directory: {content_dir}")
 
-            # 6. Load the content list
+            # 7. Load the content list
             content_list_path = content_dir / f"{pdf_name}_content_list.json"
             if not content_list_path.exists():
-                logger.error(f"Content list not found: {content_list_path}")
-                return None
+                candidates = list(content_dir.glob("*_content_list.json"))
+                if candidates:
+                    content_list_path = candidates[0]
+                    logger.info(f"Content list found via glob: {content_list_path}")
+                else:
+                    logger.error(f"Content list not found: {content_list_path}")
+                    return None
 
             with open(content_list_path, "r", encoding="utf-8") as fh:
                 content_list = json.load(fh)
 
             logger.info(f"Loaded content list with {len(content_list)} items")
 
-            # 7. Build result
+            # 8. Build result
             type_counts = self._count_content_types(content_list)
             logger.info(f"Content type counts: {type_counts}")
 

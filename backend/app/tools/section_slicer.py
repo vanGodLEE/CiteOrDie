@@ -5,8 +5,10 @@ extract the content / bounding-box positions between them.
 Main capabilities:
 * Fuzzy title matching via ``TitleMatcher`` (normalization + sliding-window
   similarity with ``SequenceMatcher``).
+* **Robust** multi-strategy title matching with cascading fallback.
 * Slicing a ``content_list`` by start/end title into a content range or a
   list of bbox positions.
+* Page-range-based fallback text extraction.
 * Converting HTML ``<table>`` fragments to plain text for downstream use.
 """
 
@@ -14,6 +16,7 @@ import re
 from typing import Optional, List, Tuple, Dict, Any
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
+from loguru import logger
 
 
 # ===========================================================================
@@ -45,6 +48,21 @@ class TitleMatcher:
         s = re.sub(r"^(第?[0-9一二三四五六七八九十]+[章节条款\.]*)", "", s)
         s = re.sub(r"^[（(]?[一二三四五六七八九十0-9]+[）)]?", "", s)
         s = re.sub(r"^[0-9]+[\.、]", "", s)
+        return s
+
+    @staticmethod
+    def normalize_title_light(title: str) -> str:
+        """
+        Light normalization – lowercase and collapse whitespace only.
+
+        Unlike :meth:`normalize_title`, this preserves punctuation and
+        numbering prefixes (e.g. ``"3.1.2"``, ``"第三章"``), providing
+        more precise disambiguation for titled sections.
+        """
+        if not title:
+            return ""
+        s = title.lower()
+        s = re.sub(r"\s+", "", s)
         return s
 
     @staticmethod
@@ -160,8 +178,116 @@ class TitleMatcher:
         return None
 
     @staticmethod
+    def find_title_in_content_list_robust(
+        target_title: str,
+        content_list: List[Dict[str, Any]],
+        page_range: Optional[Tuple[int, int]] = None,
+        similarity_threshold: float = 0.85,
+        start_from: int = 0,
+    ) -> Optional[int]:
+        """
+        Robust multi-strategy title finding with cascading fallback.
+
+        Unlike :meth:`find_title_in_content_list`, this method tries
+        several progressively relaxed strategies before giving up:
+
+        1. Standard match within page range (existing behavior).
+        2. Header-type items only with light normalization within page range
+           (catches formatting differences, prefers actual headings).
+        3. Standard match with expanded page range (±2 pages – handles
+           PageIndex / MinerU page misalignment).
+        4. Lower similarity threshold (0.70) with expanded page range
+           (handles significant text differences).
+        5. Standard match with wide page range (±5 pages – last resort
+           title search before giving up).
+
+        Returns:
+            Index into *content_list*, or ``None`` if all strategies fail.
+        """
+        # Strategy 1: standard match (original behavior)
+        result = TitleMatcher.find_title_in_content_list(
+            target_title, content_list, page_range,
+            similarity_threshold, start_from,
+        )
+        if result is not None:
+            return result
+
+        # Strategy 2: header-type preference with light normalization
+        light_target = TitleMatcher.normalize_title_light(target_title)
+        if light_target and page_range:
+            for i in range(max(0, start_from), len(content_list)):
+                content = content_list[i]
+                page_idx = content.get("page_idx", -1)
+                if not (page_range[0] <= page_idx <= page_range[1]):
+                    continue
+                if content.get("type") != "header":
+                    continue
+                content_text = TitleMatcher._extract_content_text(content)
+                if not content_text:
+                    continue
+                light_content = TitleMatcher.normalize_title_light(content_text)
+                if (light_target in light_content) or (light_content in light_target):
+                    logger.debug(
+                        f"[Robust S2] header+light match: '{target_title}' "
+                        f"-> index {i}, page {page_idx}"
+                    )
+                    return i
+
+        # Strategy 3: expanded page range (±2 pages)
+        if page_range:
+            expanded = (max(0, page_range[0] - 2), page_range[1] + 2)
+            result = TitleMatcher.find_title_in_content_list(
+                target_title, content_list, expanded,
+                similarity_threshold, start_from,
+            )
+            if result is not None:
+                logger.debug(
+                    f"[Robust S3] expanded range: '{target_title}' "
+                    f"-> index {result}, range {expanded}"
+                )
+                return result
+
+        # Strategy 4: lower threshold (0.70) with expanded range
+        if page_range:
+            expanded = (max(0, page_range[0] - 2), page_range[1] + 2)
+            result = TitleMatcher.find_title_in_content_list(
+                target_title, content_list, expanded,
+                0.70, start_from,
+            )
+            if result is not None:
+                logger.debug(
+                    f"[Robust S4] low threshold: '{target_title}' "
+                    f"-> index {result}, threshold=0.70"
+                )
+                return result
+
+        # Strategy 5: wide page range (±5 pages)
+        if page_range:
+            wide = (max(0, page_range[0] - 5), page_range[1] + 5)
+            result = TitleMatcher.find_title_in_content_list(
+                target_title, content_list, wide,
+                similarity_threshold, start_from,
+            )
+            if result is not None:
+                logger.debug(
+                    f"[Robust S5] wide range: '{target_title}' "
+                    f"-> index {result}, range {wide}"
+                )
+                return result
+
+        logger.warning(
+            f"[Robust] all 5 strategies failed for: '{target_title}'"
+        )
+        return None
+
+    @staticmethod
     def _extract_content_text(content: Dict[str, Any]) -> str:
-        """Extract the matchable text from a single content item."""
+        """
+        Extract the matchable text from a single content item.
+
+        Handles ``text``, ``header``, ``list``, ``image`` (caption),
+        ``table`` (caption), and unknown types (fallback to ``"text"`` key).
+        """
         content_type = content.get("type", "")
 
         if content_type in ("text", "header"):
@@ -179,7 +305,8 @@ class TitleMatcher:
             caption = content.get("table_caption", [])
             return " ".join(caption) if caption else ""
 
-        return ""
+        # Fallback for unknown content types: try the "text" key
+        return content.get("text", "")
 
     # -----------------------------------------------------------------------
     # Content-range slicing by title boundaries
@@ -299,6 +426,89 @@ class TitleMatcher:
                     text_parts.append("\n".join(parts))
 
         return "\n\n".join(text_parts)
+
+
+# ===========================================================================
+# Content extraction by known start index (avoids redundant title search)
+# ===========================================================================
+
+def extract_content_between(
+    start_idx: int,
+    end_title: Optional[str],
+    content_list: List[Dict[str, Any]],
+    page_range: Optional[Tuple[int, int]] = None,
+    similarity_threshold: float = 0.85,
+) -> List[Dict[str, Any]]:
+    """
+    Extract content items between a **known** *start_idx* and an *end_title*.
+
+    Unlike :meth:`TitleMatcher.find_content_range_by_titles`, this function
+    skips the start-title lookup entirely (the caller already resolved it via
+    :meth:`TitleMatcher.find_title_in_content_list_robust`).  This avoids the
+    common failure mode where a robust match cannot be reproduced by a second
+    standard-method call.
+
+    Args:
+        start_idx: Already-resolved index of the start-title item.
+        end_title: Title that marks the end boundary (exclusive), or ``None``.
+        content_list: Full MinerU content list.
+        page_range: Optional page filter (0-based).  When ``None`` the content
+            is not filtered by page.
+        similarity_threshold: Passed to :func:`_resolve_end_index` for the
+            end-title search.
+
+    Returns:
+        Content items **between** (exclusive of) the start-title and the
+        resolved end boundary.
+    """
+    end_idx = _resolve_end_index(
+        end_title, content_list, page_range,
+        similarity_threshold, start_idx,
+    )
+
+    result: List[Dict[str, Any]] = []
+    for i in range(start_idx + 1, min(end_idx, len(content_list))):
+        c = content_list[i]
+        if page_range:
+            p = c.get("page_idx", -1)
+            if not (page_range[0] <= p <= page_range[1]):
+                continue
+        result.append(c)
+
+    return result
+
+
+# ===========================================================================
+# Page-range fallback text extraction
+# ===========================================================================
+
+def extract_text_by_page_range(
+    content_list: List[Dict[str, Any]],
+    start_page: int,
+    end_page: int,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """
+    Fallback extraction: collect **all** content items within a page range
+    and assemble their text.
+
+    This is the last-resort mechanism used when title matching completely
+    fails.  It provides text for clause extraction (better than nothing)
+    and bbox positions for evidence highlighting.
+
+    Args:
+        content_list: Full MinerU content list.
+        start_page: Start page (0-based inclusive).
+        end_page: End page (0-based inclusive).
+
+    Returns:
+        ``(assembled_text, matching_content_items)``
+    """
+    matching = [
+        c for c in content_list
+        if start_page <= c.get("page_idx", -1) <= end_page
+    ]
+    text = TitleMatcher.extract_text_from_contents(matching)
+    return text, matching
 
 
 # ===========================================================================

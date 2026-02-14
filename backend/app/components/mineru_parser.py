@@ -48,9 +48,16 @@ def mineru_parser_node(state: DocumentAnalysisState) -> Dict[str, Any]:
         update_progress(task_id, 10, "Extracting document content (text + visuals)...")
         log_step(task_id, "Extracting page text and layout information")
         
+        # Build a progress callback that relays MinerU's real-time
+        # stderr output to the task tracker so users see live updates.
+        def _on_mineru_progress(message: str) -> None:
+            if task_id:
+                log_step(task_id, message)
+
         result = mineru_service.parse_pdf(
             pdf_path=pdf_path,
-            task_id=task_id or "default"
+            task_id=task_id or "default",
+            on_progress=_on_mineru_progress,
         )
         
         log_step(task_id, "MinerU parsing complete, processing results")

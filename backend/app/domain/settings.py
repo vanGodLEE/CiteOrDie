@@ -133,6 +133,14 @@ class Settings(BaseSettings):
         default=5,
         description="Max parallel workers (LangGraph concurrency)",
     )
+    pipeline_thread_pool_size: int = Field(
+        default=3,
+        description="Thread pool size for concurrent analysis pipelines",
+    )
+    vision_max_workers: int = Field(
+        default=4,
+        description="Max parallel threads for vision model image extraction",
+    )
     confidence_threshold: float = Field(
         default=0.5,
         description="Minimum confidence for clause extraction",

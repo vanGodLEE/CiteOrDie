@@ -8,7 +8,12 @@ Text Filler节点 - 精确原文填充（基于MinerU content_list）
 from typing import Dict, Any, List, Optional, Tuple
 from loguru import logger
 from app.domain.schema import DocumentAnalysisState, PageIndexNode, PageIndexDocument
-from app.tools.section_slicer import extract_content_by_title_range, extract_bbox_positions_with_titles
+from app.tools.section_slicer import (
+    extract_content_by_title_range,
+    extract_bbox_positions_with_titles,
+    extract_content_between,
+    extract_text_by_page_range,
+)
 from app.services.llm_client import get_llm_client
 from app.services.task_tracker import TaskTracker
 from app.domain.settings import settings
@@ -211,45 +216,46 @@ def fill_single_node_text(
                 f"     对应PDF页码: 第{start_page}页到第{end_page}页"
             )
             
-            # 使用title_matcher提取内容（title已包含完整序号）
-            # 先找到标题范围的content列表
+            # 使用鲁棒的多策略标题匹配（级联 fallback）
             from app.tools.section_slicer import TitleMatcher, extract_bbox_positions
             
-            # 1. 找到起始标题的索引
-            start_idx = TitleMatcher.find_title_in_content_list(
+            # 1. 使用鲁棒方法找到起始标题的索引（5 级策略级联）
+            start_idx = TitleMatcher.find_title_in_content_list_robust(
                 node.title,
                 mineru_content_list,
                 (mineru_start_page, mineru_end_page)
             )
             
             if start_idx is not None:
-                # 2. 提取原文内容（不包含起始标题本身）
-                contents = TitleMatcher.find_content_range_by_titles(
-                    start_title=node.title,
+                # 2. 确定有效页面范围（如果标题在扩展范围中找到，需扩大切片范围）
+                found_page = mineru_content_list[start_idx].get("page_idx", mineru_start_page)
+                effective_start = min(mineru_start_page, found_page)
+                effective_end = max(mineru_end_page, found_page + 3)
+                
+                # 3. 基于已知 start_idx 直接提取内容（避免重复搜索起始标题）
+                contents = extract_content_between(
+                    start_idx=start_idx,
                     end_title=end_boundary_title,
                     content_list=mineru_content_list,
-                    page_range=(mineru_start_page, mineru_end_page)
+                    page_range=(effective_start, effective_end)
                 )
                 original_text = TitleMatcher.extract_text_from_contents(contents)
                 
-                # 3. 提取positions（包含起始标题的bbox）
-                # 创建一个包含起始标题的content列表
+                # 4. 提取 positions（包含起始标题的 bbox）
                 start_content = mineru_content_list[start_idx]
                 contents_with_title = [start_content] + contents
                 positions = extract_bbox_positions(contents_with_title)
             else:
-                # 找不到起始标题，fallback
-                logger.warning(f"节点 '{node.title}' 的标题在content_list中未找到，使用页面范围fallback")
-                original_text = ""
-                # 提取整个页面范围的bbox作为fallback
-                positions = []
-                for content in mineru_content_list:
-                    page_idx = content.get("page_idx", -1)
-                    if mineru_start_page <= page_idx <= mineru_end_page:
-                        bbox = content.get("bbox")
-                        if bbox and len(bbox) == 4:
-                            position = [page_idx] + bbox
-                            positions.append(position)
+                # 所有标题匹配策略均失败 → 页面范围兜底提取
+                logger.warning(
+                    f"节点 '{node.title}' 的标题在content_list中未找到"
+                    f"（5级鲁棒策略均失败），使用页面范围文本提取作为fallback"
+                )
+                fallback_text, fallback_contents = extract_text_by_page_range(
+                    mineru_content_list, mineru_start_page, mineru_end_page
+                )
+                original_text = fallback_text
+                positions = extract_bbox_positions(fallback_contents)
             
             # 填充到节点
             node.original_text = original_text if original_text else ""
@@ -429,8 +435,9 @@ def _find_title_page_idx(
     """
     from app.tools.section_slicer import TitleMatcher
     
-    # 查找标题的索引
-    title_idx = TitleMatcher.find_title_in_content_list(
+    # 使用鲁棒方法查找标题（无页面范围限制时本质上只有策略1生效，
+    # 但保持一致性，且 light normalization 策略仍可提供额外匹配能力）
+    title_idx = TitleMatcher.find_title_in_content_list_robust(
         target_title,
         content_list,
         page_range=None  # 不限制页面范围

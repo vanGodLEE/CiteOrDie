@@ -12,6 +12,7 @@ existing completed task is reused automatically.
 import json
 import asyncio
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -22,6 +23,7 @@ from fastapi.responses import StreamingResponse, Response
 from loguru import logger
 
 from app.domain.schema import DocumentAnalysisState, PageIndexDocument
+from app.domain.settings import settings
 from app.domain.workflow import create_analysis_workflow
 from app.datasources.crud import ClauseRepository, SectionRepository, TaskRepository
 from app.datasources.database import get_db_session
@@ -29,6 +31,14 @@ from app.services.clause_matrix_export import ClauseMatrixExporter
 from app.services.task_tracker import TaskTracker
 
 router = APIRouter()
+
+# Dedicated thread pool for analysis pipelines.  Isolates long-running
+# LangGraph workflows from the default asyncio executor so that other
+# FastAPI endpoints (progress polling, task queries) remain responsive.
+_pipeline_executor = ThreadPoolExecutor(
+    max_workers=settings.pipeline_thread_pool_size,
+    thread_name_prefix="pipeline",
+)
 
 
 # ===========================================================================
@@ -72,7 +82,12 @@ async def _run_analysis_pipeline(task_id: str, pdf_path: str) -> None:
 
         graph = create_analysis_workflow()
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, graph.invoke, initial_state)
+        # Use the dedicated pipeline thread pool instead of the default
+        # executor, keeping the asyncio default pool free for fast I/O
+        # tasks (progress polling, DB queries, etc.).
+        result = await loop.run_in_executor(
+            _pipeline_executor, graph.invoke, initial_state,
+        )
 
         if result.get("error_message"):
             raise Exception(result["error_message"])
